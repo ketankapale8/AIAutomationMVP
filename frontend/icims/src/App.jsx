@@ -229,7 +229,7 @@ export default function App() {
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <span style={{ fontSize: '24px' }}>🤖</span>
             <h1 style={{ fontSize: '28px', fontWeight: '700', letterSpacing: '-0.75px', background: 'linear-gradient(90deg, #fff, #c084fc)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', margin: 0 }}>
-              Agentic JIRA Ticket Analyzer for ICIMS
+              Agentic JIRA Ticket Analyzer for iCIMS
             </h1>
           </div>
           <p style={{ color: 'var(--text-secondary)', fontSize: '14px', marginTop: '6px', fontWeight: '400' }}>
@@ -468,8 +468,29 @@ export default function App() {
             </div>
           </section>
 
-        </div>
       )}
+
+      {/* Footer Signature */}
+      <footer style={{ 
+        marginTop: '48px', 
+        padding: '24px 0 8px 0', 
+        borderTop: '1px solid var(--panel-border)', 
+        display: 'flex', 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        gap: '6px', 
+        fontSize: '13px', 
+        color: 'var(--text-muted)', 
+        position: 'relative', 
+        zIndex: '1',
+        fontFamily: 'var(--font-sans)',
+        letterSpacing: '0.5px'
+      }}>
+        <span>Made with</span>
+        <span style={{ color: '#ff5f56', fontSize: '14px', display: 'inline-block' }}>❤️</span>
+        <span>by</span>
+        <span style={{ color: 'var(--accent-secondary)', fontWeight: '600' }}>Ketan.K</span>
+      </footer>
     </div>
   );
 }
