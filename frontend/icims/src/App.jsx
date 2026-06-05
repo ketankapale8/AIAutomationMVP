@@ -224,11 +224,11 @@ export default function App() {
       <div style={{ position: 'absolute', top: '20%', right: '10%', width: '400px', height: '400px', background: 'radial-gradient(var(--accent-secondary), transparent 70%)', filter: 'blur(100px)', opacity: '0.12', pointerEvents: 'none', zIndex: '0' }}></div>
 
       {/* Header Container */}
-      <header className="glass-panel" style={{ padding: '24px 32px', marginBottom: '32px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative', zIndex: '1' }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+      <header className="glass-panel app-header">
+        <div className="header-info">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
             <span style={{ fontSize: '24px' }}>🤖</span>
-            <h1 style={{ fontSize: '28px', fontWeight: '700', letterSpacing: '-0.75px', background: 'linear-gradient(90deg, #fff, #c084fc)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', margin: 0 }}>
+            <h1 style={{ fontSize: 'var(--title-font-size, 28px)', fontWeight: '700', letterSpacing: '-0.75px', background: 'linear-gradient(90deg, #fff, #c084fc)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', margin: 0 }}>
               Agentic JIRA Ticket Analyzer for iCIMS
             </h1>
           </div>
@@ -238,7 +238,7 @@ export default function App() {
         </div>
         
         {/* Sync Status Badge */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(0, 242, 254, 0.05)', border: '1px solid rgba(0, 242, 254, 0.2)', padding: '8px 16px', borderRadius: '50px' }}>
+        <div className="status-badge" style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(0, 242, 254, 0.05)', border: '1px solid rgba(0, 242, 254, 0.2)', padding: '8px 16px', borderRadius: '50px' }}>
           <span className="pulse-dot"></span>
           <span style={{ fontSize: '13px', color: 'var(--accent-secondary)', fontWeight: '600', letterSpacing: '0.5px', textTransform: 'uppercase' }}>
             {loading ? 'Analyzing Repo' : 'Live Sync Active'}
@@ -247,7 +247,7 @@ export default function App() {
       </header>
 
       {isWaitingForTicket ? (
-        <section className="glass-panel fade-in" style={{ padding: '40px', textAlign: 'left', position: 'relative', zIndex: '1', maxWidth: '800px', margin: '0 auto' }}>
+        <section className="glass-panel fade-in" style={{ padding: 'var(--panel-padding, 40px)', textAlign: 'left', position: 'relative', zIndex: '1', maxWidth: '800px', margin: '0 auto' }}>
           {/* Glowing scanner header */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '24px' }}>
             <div style={{ position: 'relative', width: '48px', height: '48px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0, 242, 254, 0.1)', borderRadius: '12px', border: '1px solid rgba(0, 242, 254, 0.3)' }}>
@@ -331,10 +331,10 @@ export default function App() {
           </div>
         </section>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.5fr)', gap: '30px', position: 'relative', zIndex: '1' }}>
+        <div className="dashboard-grid">
           
           {/* Ticket Panel */}
-          <section className="glass-panel fade-in" style={{ padding: '24px', alignSelf: 'start', minWidth: '0' }}>
+          <section className="glass-panel fade-in" style={{ padding: 'var(--card-padding, 24px)', alignSelf: 'start', minWidth: '0' }}>
             <h2 style={{ fontSize: '18px', color: '#fff', borderBottom: '1px solid var(--panel-border)', paddingBottom: '12px', marginBottom: '20px', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '8px' }}>
               <span>📋</span> Ticket Details
             </h2>
@@ -388,15 +388,15 @@ export default function App() {
           </section>
 
           {/* Analysis Output Panel */}
-          <section className="glass-panel fade-in" style={{ padding: '24px', display: 'flex', flexDirection: 'column', minWidth: '0' }}>
+          <section className="glass-panel fade-in" style={{ padding: 'var(--card-padding, 24px)', display: 'flex', flexDirection: 'column', minWidth: '0' }}>
             
             {/* Section Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--panel-border)', paddingBottom: '12px', marginBottom: '20px' }}>
+            <div className="panel-header">
               <h2 style={{ fontSize: '18px', color: '#fff', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span>🤖</span> Technical Analysis
               </h2>
               {/* Export Actions */}
-              <div style={{ display: 'flex', gap: '8px' }}>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                 <button
                   onClick={copyMarkdownToClipboard}
                   style={{
@@ -478,6 +478,7 @@ export default function App() {
         display: 'flex', 
         justifyContent: 'center', 
         alignItems: 'center', 
+        flexWrap: 'wrap',
         gap: '8px', 
         fontSize: '13px', 
         color: 'var(--text-muted)', 
