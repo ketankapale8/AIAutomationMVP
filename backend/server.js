@@ -311,7 +311,7 @@ app.post('/api/jira-webhook', async (req, res) => {
       else if (process.env.GROQ_API_KEY) {
         console.log("🤖 Querying Groq Cloud API (Llama 3)...");
         const response = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
-          model: 'llama3-8b-8192',
+          model: 'llama-3.1-8b-instant',
           messages: [{ role: 'user', content: prompt }]
         }, {
           headers: {
