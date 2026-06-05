@@ -4,6 +4,7 @@
   --panel-bg: rgba(15, 12, 30, 0.65);
   --panel-border: rgba(255, 255, 255, 0.08);
   --panel-border-hover: rgba(168, 85, 247, 0.3);
+  --inner-bg: rgba(255, 255, 255, 0.02);
   
   --accent-primary: #a855f7; /* Violet */
   --accent-secondary: #00f2fe; /* Cyan */
@@ -121,3 +122,48 @@ body {
 .fade-in {
   animation: fadeIn 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
+
+/* Light/Dark Theme Support */
+body.light-theme {
+  --bg-dark: #f8fafc;
+  --bg-gradient: radial-gradient(circle at 50% 0%, #e2e8f0 0%, #f8fafc 70%);
+  --panel-bg: rgba(255, 255, 255, 0.75);
+  --panel-border: rgba(0, 0, 0, 0.08);
+  --panel-border-hover: rgba(168, 85, 247, 0.4);
+  --inner-bg: rgba(15, 12, 30, 0.04);
+  
+  --accent-primary: #7c3aed; /* Deeper Violet for light theme contrast */
+  --accent-secondary: #0284c7; /* Deeper Cyan/Blue */
+  --accent-gradient: linear-gradient(135deg, #7c3aed 0%, #0284c7 100%);
+  
+  --text-primary: #0f172a; /* Slate 900 */
+  --text-secondary: #334155; /* Slate 700 */
+  --text-muted: #64748b; /* Slate 500 */
+  
+  color-scheme: light;
+  background: var(--bg-dark);
+  color: var(--text-primary);
+}
+
+/* Specific light theme contrast adjustments */
+body.light-theme .glass-panel {
+  box-shadow: 0 8px 32px 0 rgba(15, 12, 30, 0.05);
+}
+
+body.light-theme h1,
+body.light-theme h2,
+body.light-theme h3 {
+  color: #0f172a !important;
+}
+
+body.light-theme pre {
+  background: #0f172a !important;
+  color: #f8fafc !important;
+  box-shadow: inset 0 0 20px rgba(0,0,0,0.8);
+}
+
+body.light-theme code {
+  color: #7c3aed;
+  background: rgba(124, 58, 237, 0.08);
+}
+

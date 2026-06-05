@@ -31,6 +31,16 @@ const TEST_SCENARIOS = [
 export default function App() {
   const [data, setData] = useState({ title: 'Waiting for ticket...', description: 'Create a ticket on your Jira board to trigger the workflow.', solution: '', images: [] });
   const [loading, setLoading] = useState(false);
+  const [theme, setTheme] = useState('dark');
+
+  useEffect(() => {
+    if (theme === 'light') {
+      document.body.classList.add('light-theme');
+    } else {
+      document.body.classList.remove('light-theme');
+    }
+  }, [theme]);
+
 
   const fetchLatestData = async () => {
     try {
@@ -137,7 +147,7 @@ export default function App() {
     const boldParts = text.split(/(\*\*.*?\*\*)/g);
     return boldParts.map((boldPart, bIdx) => {
       if (boldPart.startsWith('**') && boldPart.endsWith('**')) {
-        return <strong key={bIdx} style={{ color: '#ffffff', fontWeight: '600' }}>{parseInlineCode(boldPart.slice(2, -2))}</strong>;
+        return <strong key={bIdx} style={{ fontWeight: '600' }}>{parseInlineCode(boldPart.slice(2, -2))}</strong>;
       }
       return parseInlineCode(boldPart);
     });
@@ -228,21 +238,48 @@ export default function App() {
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <span style={{ fontSize: '24px' }}>🤖</span>
-            <h1 style={{ fontSize: '28px', fontWeight: '700', letterSpacing: '-0.75px', background: 'linear-gradient(90deg, #fff, #c084fc)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', margin: 0 }}>
+            <h1 style={{ fontSize: '28px', fontWeight: '700', letterSpacing: '-0.75px', background: 'linear-gradient(90deg, var(--text-primary), var(--accent-primary))', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', margin: 0 }}>
               Agentic JIRA Ticket Analyzer for iCIMS
             </h1>
           </div>
           <p style={{ color: 'var(--text-secondary)', fontSize: '14px', marginTop: '6px', fontWeight: '400' }}>
-            Local Llama 3 Technical Analysis Engine for <code style={{ fontSize: '12px', background: 'rgba(255,255,255,0.05)', color: '#fff' }}>nextjs-dnd</code>
+            Local Llama 3 Technical Analysis Engine for <code style={{ fontSize: '12px' }}>nextjs-dnd</code>
           </p>
         </div>
         
-        {/* Sync Status Badge */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(0, 242, 254, 0.05)', border: '1px solid rgba(0, 242, 254, 0.2)', padding: '8px 16px', borderRadius: '50px' }}>
-          <span className="pulse-dot"></span>
-          <span style={{ fontSize: '13px', color: 'var(--accent-secondary)', fontWeight: '600', letterSpacing: '0.5px', textTransform: 'uppercase' }}>
-            {loading ? 'Analyzing Repo' : 'Live Sync Active'}
-          </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          {/* Theme Toggle Button */}
+          <button
+            onClick={() => setTheme(prev => prev === 'dark' ? 'light' : 'dark')}
+            style={{
+              background: 'rgba(255, 255, 255, 0.05)',
+              border: '1px solid var(--panel-border)',
+              borderRadius: '50%',
+              width: '38px',
+              height: '38px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              color: 'var(--text-primary)',
+              transition: 'all 0.2s ease',
+              fontSize: '16px',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+            }}
+            onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'; }}
+            onMouseOut={(e) => { e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)'; }}
+            title={theme === 'dark' ? "Switch to Light Mode" : "Switch to Dark Mode"}
+          >
+            {theme === 'dark' ? '☀️' : '🌙'}
+          </button>
+
+          {/* Sync Status Badge */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(0, 242, 254, 0.05)', border: '1px solid rgba(0, 242, 254, 0.2)', padding: '8px 16px', borderRadius: '50px' }}>
+            <span className="pulse-dot"></span>
+            <span style={{ fontSize: '13px', color: 'var(--accent-secondary)', fontWeight: '600', letterSpacing: '0.5px', textTransform: 'uppercase' }}>
+              {loading ? 'Analyzing Repo' : 'Live Sync Active'}
+            </span>
+          </div>
         </div>
       </header>
 
@@ -254,7 +291,7 @@ export default function App() {
               <span style={{ fontSize: '24px', animation: 'pulse 1.5s infinite ease-in-out' }}>📡</span>
             </div>
             <div>
-              <h2 style={{ fontSize: '20px', fontWeight: '600', color: '#fff', margin: 0 }}>Waiting for Jira Ticket...</h2>
+              <h2 style={{ fontSize: '20px', fontWeight: '600', color: 'var(--text-primary)', margin: 0 }}>Waiting for Jira Ticket...</h2>
               <p style={{ color: 'var(--text-secondary)', fontSize: '14px', marginTop: '2px' }}>Create a ticket on your Jira board to trigger the analysis workflow.</p>
             </div>
           </div>
@@ -267,9 +304,9 @@ export default function App() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
               {/* Step 1 */}
               <div style={{ display: 'flex', gap: '16px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '28px', height: '28px', borderRadius: '50%', background: 'rgba(168, 85, 247, 0.2)', border: '1px solid rgba(168, 85, 247, 0.4)', color: '#d8b4fe', fontSize: '13px', fontWeight: '700', flexShrink: 0 }}>1</div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '28px', height: '28px', borderRadius: '50%', background: 'rgba(168, 85, 247, 0.1)', border: '1px solid var(--panel-border)', color: 'var(--accent-primary)', fontSize: '13px', fontWeight: '700', flexShrink: 0 }}>1</div>
                 <div>
-                  <h4 style={{ fontSize: '14.5px', color: '#fff', fontWeight: '600' }}>Expose local port 5001 to the internet</h4>
+                  <h4 style={{ fontSize: '14.5px', color: 'var(--text-primary)', fontWeight: '600' }}>Expose local port 5001 to the internet</h4>
                   <p style={{ fontSize: '13.5px', color: 'var(--text-secondary)', marginTop: '4px' }}>
                     Since Jira Cloud resides on the web, it needs a public URL to send webhooks to your local machine. Start a secure tunnel in a new terminal window:
                   </p>
@@ -293,11 +330,11 @@ export default function App() {
 
               {/* Step 2 */}
               <div style={{ display: 'flex', gap: '16px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '28px', height: '28px', borderRadius: '50%', background: 'rgba(168, 85, 247, 0.2)', border: '1px solid rgba(168, 85, 247, 0.4)', color: '#d8b4fe', fontSize: '13px', fontWeight: '700', flexShrink: 0 }}>2</div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '28px', height: '28px', borderRadius: '50%', background: 'rgba(168, 85, 247, 0.1)', border: '1px solid var(--panel-border)', color: 'var(--accent-primary)', fontSize: '13px', fontWeight: '700', flexShrink: 0 }}>2</div>
                 <div>
-                  <h4 style={{ fontSize: '14.5px', color: '#fff', fontWeight: '600' }}>Add Webhook URL in Jira Settings</h4>
+                  <h4 style={{ fontSize: '14.5px', color: 'var(--text-primary)', fontWeight: '600' }}>Add Webhook URL in Jira Settings</h4>
                   <p style={{ fontSize: '13.5px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-                    Go to your Jira settings (<strong style={{ color: '#fff' }}>Jira Settings &gt; System &gt; Webhooks</strong>) and click <strong style={{ color: '#fff' }}>Create a Webhook</strong>. Set the URL to:
+                    Go to your Jira settings (<strong style={{ color: 'var(--text-primary)', fontWeight: '600' }}>Jira Settings &gt; System &gt; Webhooks</strong>) and click <strong style={{ color: 'var(--text-primary)', fontWeight: '600' }}>Create a Webhook</strong>. Set the URL to:
                   </p>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#090714', border: '1px solid var(--panel-border)', borderRadius: '8px', padding: '10px 14px', marginTop: '8px', fontFamily: 'var(--font-mono)', fontSize: '13px', color: 'var(--accent-secondary)' }}>
                     <span style={{ flexGrow: 1, whiteSpace: 'nowrap', overflowX: 'auto' }}>https://&lt;your-tunnel-url&gt;/api/jira-webhook</span>
@@ -307,20 +344,20 @@ export default function App() {
 
               {/* Step 3 */}
               <div style={{ display: 'flex', gap: '16px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '28px', height: '28px', borderRadius: '50%', background: 'rgba(168, 85, 247, 0.2)', border: '1px solid rgba(168, 85, 247, 0.4)', color: '#d8b4fe', fontSize: '13px', fontWeight: '700', flexShrink: 0 }}>3</div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '28px', height: '28px', borderRadius: '50%', background: 'rgba(168, 85, 247, 0.1)', border: '1px solid var(--panel-border)', color: 'var(--accent-primary)', fontSize: '13px', fontWeight: '700', flexShrink: 0 }}>3</div>
                 <div>
-                  <h4 style={{ fontSize: '14.5px', color: '#fff', fontWeight: '600' }}>Select Issue Trigger Event</h4>
+                  <h4 style={{ fontSize: '14.5px', color: 'var(--text-primary)', fontWeight: '600' }}>Select Issue Trigger Event</h4>
                   <p style={{ fontSize: '13.5px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-                    Scroll down to <strong style={{ color: '#fff' }}>Issue related events</strong>, set JQL to <code style={{ fontSize: '12px', background: 'rgba(255,255,255,0.05)' }}>All issues</code> (or filter by project), and check the <strong style={{ color: '#fff' }}>created</strong> event under the Issue column. Save the Webhook.
+                    Scroll down to <strong style={{ color: 'var(--text-primary)', fontWeight: '600' }}>Issue related events</strong>, set JQL to <code style={{ fontSize: '12px' }}>All issues</code> (or filter by project), and check the <strong style={{ color: 'var(--text-primary)', fontWeight: '600' }}>created</strong> event under the Issue column. Save the Webhook.
                   </p>
                 </div>
               </div>
 
               {/* Step 4 */}
               <div style={{ display: 'flex', gap: '16px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '28px', height: '28px', borderRadius: '50%', background: 'rgba(168, 85, 247, 0.2)', border: '1px solid rgba(168, 85, 247, 0.4)', color: '#d8b4fe', fontSize: '13px', fontWeight: '700', flexShrink: 0 }}>4</div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '28px', height: '28px', borderRadius: '50%', background: 'rgba(168, 85, 247, 0.1)', border: '1px solid var(--panel-border)', color: 'var(--accent-primary)', fontSize: '13px', fontWeight: '700', flexShrink: 0 }}>4</div>
                 <div>
-                  <h4 style={{ fontSize: '14.5px', color: '#fff', fontWeight: '600' }}>Create a Ticket on Jira Board</h4>
+                  <h4 style={{ fontSize: '14.5px', color: 'var(--text-primary)', fontWeight: '600' }}>Create a Ticket on Jira Board</h4>
                   <p style={{ fontSize: '13.5px', color: 'var(--text-secondary)', marginTop: '4px' }}>
                     Create a new ticket directly on your Kanban or Scrum board. As soon as you save the ticket, the webhook will fire, and the agentic analyzer will automatically read your codebase, analyze the ticket, and render the solution here.
                   </p>
@@ -335,15 +372,15 @@ export default function App() {
           
           {/* Ticket Panel */}
           <section className="glass-panel fade-in" style={{ padding: '24px', alignSelf: 'start', minWidth: '0' }}>
-            <h2 style={{ fontSize: '18px', color: '#fff', borderBottom: '1px solid var(--panel-border)', paddingBottom: '12px', marginBottom: '20px', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <h2 style={{ fontSize: '18px', color: 'var(--text-primary)', borderBottom: '1px solid var(--panel-border)', paddingBottom: '12px', marginBottom: '20px', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '8px' }}>
               <span>📋</span> Ticket Details
             </h2>
             
             <div style={{ textAlign: 'left' }}>
-              <span style={{ display: 'inline-block', background: 'rgba(168, 85, 247, 0.15)', color: '#d8b4fe', fontSize: '11px', fontWeight: '700', padding: '4px 8px', borderRadius: '4px', textTransform: 'uppercase', marginBottom: '8px', border: '1px solid rgba(168, 85, 247, 0.3)' }}>
+              <span style={{ display: 'inline-block', background: 'rgba(168, 85, 247, 0.15)', color: 'var(--accent-primary)', fontSize: '11px', fontWeight: '700', padding: '4px 8px', borderRadius: '4px', textTransform: 'uppercase', marginBottom: '8px', border: '1px solid rgba(168, 85, 247, 0.3)' }}>
                 Webhook Triggered
               </span>
-              <h3 style={{ fontSize: '18px', color: '#fff', fontWeight: '600', marginBottom: '16px', lineHeight: '1.4' }}>
+              <h3 style={{ fontSize: '18px', color: 'var(--text-primary)', fontWeight: '600', marginBottom: '16px', lineHeight: '1.4' }}>
                 {data.title}
               </h3>
 
@@ -351,7 +388,7 @@ export default function App() {
                 <h4 style={{ fontSize: '13px', color: 'var(--text-muted)', fontWeight: '600', textTransform: 'uppercase', marginBottom: '8px' }}>
                   Description
                 </h4>
-                <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--panel-border)', padding: '16px', borderRadius: '10px', fontSize: '14px', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', lineHeight: '1.5' }}>
+                <div style={{ background: 'var(--inner-bg)', border: '1px solid var(--panel-border)', padding: '16px', borderRadius: '10px', fontSize: '14px', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', lineHeight: '1.5' }}>
                   {data.description}
                 </div>
               </div>
@@ -377,7 +414,7 @@ export default function App() {
               <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--panel-border)', paddingTop: '16px', marginTop: '20px', fontSize: '13px' }}>
                 <div>
                   <span style={{ color: 'var(--text-muted)' }}>Target Repository:</span>
-                  <div style={{ color: '#fff', fontWeight: '500', marginTop: '2px' }}>repo/nextjs-dnd</div>
+                  <div style={{ color: 'var(--text-primary)', fontWeight: '500', marginTop: '2px' }}>repo/nextjs-dnd</div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
                   <span style={{ color: 'var(--text-muted)' }}>Agent Assigned:</span>
@@ -392,7 +429,7 @@ export default function App() {
             
             {/* Section Header */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--panel-border)', paddingBottom: '12px', marginBottom: '20px' }}>
-              <h2 style={{ fontSize: '18px', color: '#fff', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <h2 style={{ fontSize: '18px', color: 'var(--text-primary)', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span>🤖</span> Technical Analysis
               </h2>
               {/* Export Actions */}
@@ -413,7 +450,7 @@ export default function App() {
                     alignItems: 'center',
                     gap: '6px'
                   }}
-                  onMouseOver={(e) => { e.target.style.background = 'rgba(255, 255, 255, 0.1)'; e.target.style.color = '#fff'; }}
+                  onMouseOver={(e) => { e.target.style.background = 'rgba(255, 255, 255, 0.1)'; e.target.style.color = 'var(--text-primary)'; }}
                   onMouseOut={(e) => { e.target.style.background = 'rgba(255, 255, 255, 0.05)'; e.target.style.color = 'var(--text-secondary)'; }}
                 >
                   <span>📋</span> Copy Markdown
@@ -434,7 +471,7 @@ export default function App() {
                     alignItems: 'center',
                     gap: '6px'
                   }}
-                  onMouseOver={(e) => { e.target.style.background = 'rgba(0, 242, 254, 0.2)'; e.target.style.color = '#fff'; }}
+                  onMouseOver={(e) => { e.target.style.background = 'rgba(0, 242, 254, 0.2)'; e.target.style.color = 'var(--text-primary)'; }}
                   onMouseOut={(e) => { e.target.style.background = 'rgba(0, 242, 254, 0.1)'; e.target.style.color = 'var(--accent-secondary)'; }}
                 >
                   <span>📄</span> Export to PDF
