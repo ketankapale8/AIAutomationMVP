@@ -32,10 +32,10 @@ export default function App() {
   const [data, setData] = useState({ title: 'Waiting for ticket...', description: 'Create a ticket on your Jira board to trigger the workflow.', solution: '', images: [] });
   const [loading, setLoading] = useState(false);
 
-  // Fetch the latest analysis from the backend polling endpoint
   const fetchLatestData = async () => {
     try {
-      const response = await axios.get('http://localhost:5001/api/latest-analysis');
+      const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5001';
+      const response = await axios.get(`${backendUrl}/api/latest-analysis`);
       if (response.data) {
         setData(response.data);
       }
