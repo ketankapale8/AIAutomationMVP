@@ -157,6 +157,64 @@ export default function App() {
     });
   };
 
+  const copyMarkdownToClipboard = () => {
+    if (!data || !data.solution) return;
+    navigator.clipboard.writeText(data.solution);
+    alert("Markdown copied to clipboard!");
+  };
+
+  const exportToPDF = () => {
+    if (!data || !data.solution) return;
+    const printWindow = window.open('', '_blank');
+    
+    // Convert basic markdown tags to simple HTML formatting for high-quality printing
+    const formattedSolution = data.solution
+      .replace(/\n/g, '<br/>')
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/`(.*?)`/g, '<code>$1</code>')
+      .replace(/✦/g, '&bull;');
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>${data.title} - Technical Analysis</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 40px; color: #1f2937; line-height: 1.6; }
+            .header { border-bottom: 2px solid #e5e7eb; padding-bottom: 20px; margin-bottom: 30px; }
+            h1 { color: #6d28d9; margin: 0; font-size: 24px; }
+            .meta { margin-top: 10px; font-size: 13px; color: #4b5563; }
+            h2 { color: #4338ca; font-size: 18px; margin-top: 30px; border-bottom: 1px solid #f3f4f6; padding-bottom: 5px; }
+            pre { background: #f3f4f6; border: 1px solid #e5e7eb; padding: 15px; border-radius: 8px; overflow-x: auto; font-family: monospace; font-size: 13px; }
+            code { background: #f3f4f6; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 13px; }
+            .description { background: #f9fafb; border: 1px solid #f3f4f6; padding: 15px; border-radius: 8px; font-size: 14px; margin-bottom: 30px; white-space: pre-wrap; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>📄 AI Technical Analysis</h1>
+            <div class="meta">
+              <strong>Ticket:</strong> ${data.title}<br/>
+              <strong>Date:</strong> ${new Date().toLocaleString()}
+            </div>
+          </div>
+          
+          <h2>Ticket Description</h2>
+          <div class="description">${data.description}</div>
+          
+          <h2>Technical Analysis & Suggested Changes</h2>
+          <div style="font-size: 14.5px;">${formattedSolution}</div>
+          
+          <script>
+            window.onload = function() {
+              window.print();
+            }
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
+
   const isWaitingForTicket = !data || data.title === "Waiting for ticket...";
 
   return (
@@ -337,6 +395,51 @@ export default function App() {
               <h2 style={{ fontSize: '18px', color: '#fff', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span>🤖</span> Technical Analysis
               </h2>
+              {/* Export Actions */}
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  onClick={copyMarkdownToClipboard}
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.05)',
+                    border: '1px solid var(--panel-border)',
+                    borderRadius: '6px',
+                    color: 'var(--text-secondary)',
+                    padding: '6px 12px',
+                    fontSize: '12.5px',
+                    fontWeight: '500',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                  onMouseOver={(e) => { e.target.style.background = 'rgba(255, 255, 255, 0.1)'; e.target.style.color = '#fff'; }}
+                  onMouseOut={(e) => { e.target.style.background = 'rgba(255, 255, 255, 0.05)'; e.target.style.color = 'var(--text-secondary)'; }}
+                >
+                  <span>📋</span> Copy Markdown
+                </button>
+                <button
+                  onClick={exportToPDF}
+                  style={{
+                    background: 'rgba(0, 242, 254, 0.1)',
+                    border: '1px solid rgba(0, 242, 254, 0.3)',
+                    borderRadius: '6px',
+                    color: 'var(--accent-secondary)',
+                    padding: '6px 12px',
+                    fontSize: '12.5px',
+                    fontWeight: '500',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                  onMouseOver={(e) => { e.target.style.background = 'rgba(0, 242, 254, 0.2)'; e.target.style.color = '#fff'; }}
+                  onMouseOut={(e) => { e.target.style.background = 'rgba(0, 242, 254, 0.1)'; e.target.style.color = 'var(--accent-secondary)'; }}
+                >
+                  <span>📄</span> Export to PDF
+                </button>
+              </div>
             </div>
 
             {/* Section Content */}
