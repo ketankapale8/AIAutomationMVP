@@ -378,5 +378,10 @@ app.get('/api/latest-analysis', (req, res) => {
   res.json(latestTicketAnalysis);
 });
 
+// 3. Welcome / Status Endpoint
+app.get('/', (req, res) => {
+  res.send('🚀 Agentic JIRA Ticket Analyzer Backend is running!');
+});
+
 const PORT = 5001;
 app.listen(PORT, () => console.log(`🚀 Agent Backend running on http://localhost:${PORT}`));
