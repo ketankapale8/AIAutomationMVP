@@ -165,7 +165,7 @@ app.post('/api/jira-webhook', async (req, res) => {
           });
         }
 
-        console.log(`🔍 GitHub API: Selected ${selectedFiles.length} files matching context.`);
+        console.log(`🔍 GitHub API: Selected ${selectedFiles.length} files matching context:`, selectedFiles.map(f => f.path));
 
         if (selectedFiles.length > 0) {
           const contentsPromise = selectedFiles.map(async f => {
@@ -230,7 +230,7 @@ app.post('/api/jira-webhook', async (req, res) => {
           });
         }
 
-        console.log(`🔍 Local scan: Selected ${selectedFiles.length} files for context.`);
+        console.log(`🔍 Local scan: Selected ${selectedFiles.length} files for context:`, selectedFiles.map(fp => path.relative(repoPath, fp)));
 
         if (selectedFiles.length > 0) {
           codebaseContext = selectedFiles.map(filePath => {
@@ -251,6 +251,8 @@ app.post('/api/jira-webhook', async (req, res) => {
     const attachmentInfoText = attachments.length > 0
       ? `Ticket Attachments:\n${attachments.map(a => `- ${a.filename} (${a.mimeType})`).join('\n')}`
       : '';
+
+    console.log(`📝 Codebase Context Size: ${codebaseContext.length} characters.`);
 
     // 3. Construct Agent B's analysis prompt with strict speed instructions
     const prompt = `
