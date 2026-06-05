@@ -207,6 +207,11 @@ app.post('/api/jira-webhook', async (req, res) => {
 
         console.log(`🔍 GitHub API: Selected ${selectedFiles.length} files matching context:`, selectedFiles.map(f => f.path));
 
+        if (selectedFiles.length > 3) {
+          console.log(`⚠️ Too many files selected (${selectedFiles.length}). Limiting to top 3 matching files to prevent Groq rate limits...`);
+          selectedFiles = selectedFiles.slice(0, 3);
+        }
+
         if (selectedFiles.length > 0) {
           const contentsPromise = selectedFiles.map(async f => {
             try {
@@ -271,6 +276,11 @@ app.post('/api/jira-webhook', async (req, res) => {
         }
 
         console.log(`🔍 Local scan: Selected ${selectedFiles.length} files for context:`, selectedFiles.map(fp => path.relative(repoPath, fp)));
+
+        if (selectedFiles.length > 3) {
+          console.log(`⚠️ Too many files selected (${selectedFiles.length}). Limiting to top 3 matching files to prevent API rate limits...`);
+          selectedFiles = selectedFiles.slice(0, 3);
+        }
 
         if (selectedFiles.length > 0) {
           codebaseContext = selectedFiles.map(filePath => {
