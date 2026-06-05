@@ -1,0 +1,382 @@
+// backend/server.js
+const express = require('express');
+const cors = require('cors');
+const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+// Load environment variables manually from .env if it exists
+if (fs.existsSync(path.join(__dirname, '.env'))) {
+  const envContent = fs.readFileSync(path.join(__dirname, '.env'), 'utf8');
+  envContent.split('\n').forEach(line => {
+    const match = line.match(/^\s*([\w.-]+)\s*=\s*(.*)?\s*$/);
+    if (match) {
+      const key = match[1];
+      let value = match[2] || '';
+      if (value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1);
+      if (value.startsWith("'") && value.endsWith("'")) value = value.slice(1, -1);
+      process.env[key] = value.trim();
+    }
+  });
+}
+
+// Global variable to store the latest ticket data for the frontend to fetch
+let latestTicketAnalysis = {
+  title: "Waiting for ticket...",
+  description: "Create a ticket on your Jira board to trigger the workflow.",
+  solution: "No analysis generated yet.",
+  images: []
+};
+
+// Helper function to parse Atlassian Document Format (ADF) description into plain text
+function parseADF(node) {
+  if (!node) return "";
+  if (typeof node === 'string') return node;
+  if (node.type === 'text') return node.text || "";
+  if (Array.isArray(node.content)) {
+    return node.content.map(parseADF).join(" ");
+  }
+  if (node.content) {
+    return parseADF(node.content);
+  }
+  return "";
+}
+
+// Helper function to download Jira attachments
+const downloadAttachment = async (url, filename) => {
+  const attachmentsDir = path.join(__dirname, '..', 'frontend', 'icims', 'public', 'attachments');
+  if (!fs.existsSync(attachmentsDir)) {
+    fs.mkdirSync(attachmentsDir, { recursive: true });
+  }
+
+  const destPath = path.join(attachmentsDir, filename);
+  const writer = fs.createWriteStream(destPath);
+
+  // Jira Cloud API requires authorization to download attachments for private projects.
+  // Set JIRA_EMAIL and JIRA_API_TOKEN environment variables if needed.
+  const headers = {};
+  if (process.env.JIRA_EMAIL && process.env.JIRA_API_TOKEN) {
+    const auth = Buffer.from(`${process.env.JIRA_EMAIL}:${process.env.JIRA_API_TOKEN}`).toString('base64');
+    headers['Authorization'] = `Basic ${auth}`;
+  }
+
+  try {
+    const response = await axios({
+      url,
+      method: 'GET',
+      responseType: 'stream',
+      headers
+    });
+
+    response.data.pipe(writer);
+
+    return new Promise((resolve, reject) => {
+      writer.on('finish', () => resolve(`/attachments/${filename}`));
+      writer.on('error', reject);
+    });
+  } catch (error) {
+    console.error(`Failed to download attachment ${filename}:`, error.message);
+    return null;
+  }
+};
+
+// 1. JIRA Webhook Listener Endpoint
+app.post('/api/jira-webhook', async (req, res) => {
+  try {
+    const issue = req.body.issue;
+    if (!issue) {
+      return res.status(200).send("Not an issue creation event.");
+    }
+
+    const ticketKey = issue.key; // e.g., SCRUM-1
+    const title = issue.fields.summary;
+    
+    // Parse description in case it is an Atlassian Document Format object
+    const rawDescription = issue.fields.description || "No description provided.";
+    const description = typeof rawDescription === 'object' ? parseADF(rawDescription) : rawDescription;
+    
+    // Parse attachments (specifically images)
+    const attachments = issue.fields.attachment || [];
+    const imagePaths = [];
+    
+    for (const att of attachments) {
+      if (att.mimeType && att.mimeType.startsWith('image/')) {
+        console.log(`📸 Image attachment detected: ${att.filename}`);
+        const localPath = await downloadAttachment(att.content, `${ticketKey}_${att.filename}`);
+        if (localPath) {
+          imagePaths.push(localPath);
+        } else {
+          // Fallback to remote URL
+          imagePaths.push(att.content);
+        }
+      }
+    }
+
+    console.log(`\n⚡ Jira Webhook Detected: [${ticketKey}] - ${title}`);
+    if (imagePaths.length > 0) {
+      console.log(`📎 Downloaded/linked ${imagePaths.length} image attachments.`);
+    }
+
+    // 2. Read Codebase Context (Dynamic GitHub API or Local Scan fallback)
+    let codebaseContext = "";
+    const githubOwner = process.env.GITHUB_OWNER;
+    const githubRepo = process.env.GITHUB_REPO;
+    const githubToken = process.env.GITHUB_TOKEN;
+    const githubBranch = process.env.GITHUB_BRANCH || "main";
+
+    if (githubToken && githubOwner && githubRepo) {
+      console.log(`🔍 Querying GitHub API for repository: ${githubOwner}/${githubRepo} (${githubBranch})...`);
+      try {
+        // Fetch the file tree recursively
+        const treeUrl = `https://api.github.com/repos/${githubOwner}/${githubRepo}/git/trees/${githubBranch}?recursive=1`;
+        const headers = {
+          'Authorization': `token ${githubToken}`,
+          'Accept': 'application/vnd.github.v3+json',
+          'User-Agent': 'ICIMS-AI-Agent'
+        };
+
+        const treeResponse = await axios.get(treeUrl, { headers });
+        const files = treeResponse.data.tree || [];
+
+        // Filter files inside "src/" with extensions we care about
+        const allFiles = files.filter(f => 
+          f.type === 'blob' && 
+          f.path.startsWith('src/') && 
+          ['.tsx', '.ts', '.jsx', '.js', '.css', '.json'].includes(path.extname(f.path))
+        );
+
+        // Filter files matching terms in ticket description/title
+        const ticketText = `${title} ${description}`.toLowerCase();
+        let selectedFiles = allFiles.filter(f => {
+          const baseName = path.basename(f.path).toLowerCase();
+          const nameWithoutExt = path.basename(f.path, path.extname(f.path)).toLowerCase();
+          return ticketText.includes(baseName) || ticketText.includes(nameWithoutExt);
+        });
+
+        // Default fallback if no specific keywords match
+        if (selectedFiles.length === 0) {
+          selectedFiles = allFiles.filter(f => {
+            const baseName = path.basename(f.path);
+            return ['page.tsx', 'SortableLinks.tsx'].includes(baseName);
+          });
+        }
+
+        console.log(`🔍 GitHub API: Selected ${selectedFiles.length} files matching context.`);
+
+        if (selectedFiles.length > 0) {
+          const contentsPromise = selectedFiles.map(async f => {
+            try {
+              const fileUrl = `https://raw.githubusercontent.com/${githubOwner}/${githubRepo}/${githubBranch}/${f.path}`;
+              // Make raw fetch request
+              const contentRes = await axios.get(fileUrl, { headers });
+              const content = typeof contentRes.data === 'object' ? JSON.stringify(contentRes.data, null, 2) : contentRes.data;
+              return `--- File: ${f.path} ---\n${content}`;
+            } catch (fileErr) {
+              console.error(`Failed to fetch file content for ${f.path}:`, fileErr.message);
+              return `--- File: ${f.path} ---\n[Error fetching file content from GitHub]`;
+            }
+          });
+          const contents = await Promise.all(contentsPromise);
+          codebaseContext = contents.join('\n\n');
+        } else {
+          codebaseContext = "No relevant codebase files found in the specified GitHub repository.";
+        }
+      } catch (err) {
+        console.error("Error fetching repository from GitHub API:", err.message);
+        codebaseContext = `Error reading codebase files from GitHub API: ${err.message}`;
+      }
+    } else {
+      // Fallback to local scan
+      console.log("⚠️ GitHub credentials not found in env. Falling back to local filesystem scan...");
+      
+      const scanDir = (dir, fileList = []) => {
+        if (!fs.existsSync(dir)) return fileList;
+        const files = fs.readdirSync(dir);
+        files.forEach(file => {
+          const filePath = path.join(dir, file);
+          const stat = fs.statSync(filePath);
+          if (stat.isDirectory()) {
+            if (file !== 'node_modules' && file !== '.git' && file !== '.next') {
+              scanDir(filePath, fileList);
+            }
+          } else {
+            const ext = path.extname(file);
+            if (['.tsx', '.ts', '.jsx', '.js', '.css', '.json'].includes(ext)) {
+              fileList.push(filePath);
+            }
+          }
+        });
+        return fileList;
+      };
+
+      const repoPath = path.join(__dirname, '..', 'repo', 'nextjs-dnd', 'src');
+      try {
+        const allFiles = scanDir(repoPath);
+        const ticketText = `${title} ${description}`.toLowerCase();
+        let selectedFiles = allFiles.filter(filePath => {
+          const baseName = path.basename(filePath).toLowerCase();
+          const nameWithoutExt = path.basename(filePath, path.extname(filePath)).toLowerCase();
+          return ticketText.includes(baseName) || ticketText.includes(nameWithoutExt);
+        });
+
+        if (selectedFiles.length === 0) {
+          selectedFiles = allFiles.filter(filePath => {
+            const baseName = path.basename(filePath);
+            return ['page.tsx', 'SortableLinks.tsx'].includes(baseName);
+          });
+        }
+
+        console.log(`🔍 Local scan: Selected ${selectedFiles.length} files for context.`);
+
+        if (selectedFiles.length > 0) {
+          codebaseContext = selectedFiles.map(filePath => {
+            const relativePath = path.relative(path.join(__dirname, '..', 'repo', 'nextjs-dnd'), filePath);
+            const content = fs.readFileSync(filePath, 'utf8');
+            return `--- File: ${relativePath} ---\n${content}`;
+          }).join('\n\n');
+        } else {
+          codebaseContext = "No codebase files found in the source directory.";
+        }
+      } catch (err) {
+        console.error("Error scanning repository:", err.message);
+        codebaseContext = "Error reading codebase files.";
+      }
+    }
+
+    // List of attachments for LLM prompt context
+    const attachmentInfoText = attachments.length > 0
+      ? `Ticket Attachments:\n${attachments.map(a => `- ${a.filename} (${a.mimeType})`).join('\n')}`
+      : '';
+
+    // 3. Construct Agent B's analysis prompt with strict speed instructions
+    const prompt = `
+      You are an expert AI Technical Analyst. A new Jira ticket has been created.
+      
+      Ticket Title: ${title}
+      Ticket Description: ${description}
+      ${attachmentInfoText}
+
+      Here is the relevant codebase context from the Next.js DnD repository:
+      ${codebaseContext}
+
+      Analyze the issue and provide a structured technical analysis.
+      Explain what needs to be changed and where.
+      Suggest the exact code changes or logic fixes needed in Markdown format.
+      
+      CRITICAL INSTRUCTIONS FOR SPEED AND CONCISENESS:
+      - Keep your response extremely brief, concise, and direct (under 150 words).
+      - Skip any conversational filler, pleasantries, or introductions.
+      - Output ONLY the analysis and the code changes.
+      - Be extremely precise and reference the specific file names.
+    `;
+
+    let technicalSolution = "";
+
+    // 4. Query configured LLM Provider (cloud APIs or local Ollama)
+    try {
+      if (process.env.DEEPSEEK_API_KEY) {
+        console.log("🤖 Querying DeepSeek API (deepseek-chat)...");
+        const response = await axios.post('https://api.deepseek.com/v1/chat/completions', {
+          model: 'deepseek-chat',
+          messages: [{ role: 'user', content: prompt }]
+        }, {
+          headers: {
+            'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        technicalSolution = response.data.choices[0].message.content;
+        console.log("✅ Solution generated by DeepSeek.");
+      }
+      else if (process.env.GEMINI_API_KEY) {
+        console.log("🤖 Querying Google Gemini API (Gemini 1.5 Flash)...");
+        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
+        const response = await axios.post(geminiUrl, {
+          contents: [{
+            parts: [{ text: prompt }]
+          }]
+        });
+        
+        if (response.data && response.data.candidates && response.data.candidates[0].content && response.data.candidates[0].content.parts) {
+          technicalSolution = response.data.candidates[0].content.parts[0].text;
+          console.log("✅ Solution generated by Gemini.");
+        } else {
+          throw new Error("Unexpected Gemini API response structure: " + JSON.stringify(response.data));
+        }
+      } 
+      else if (process.env.GROQ_API_KEY) {
+        console.log("🤖 Querying Groq Cloud API (Llama 3)...");
+        const response = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
+          model: 'llama3-8b-8192',
+          messages: [{ role: 'user', content: prompt }]
+        }, {
+          headers: {
+            'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        technicalSolution = response.data.choices[0].message.content;
+        console.log("✅ Solution generated by Groq.");
+      } 
+      else if (process.env.OPENAI_API_KEY) {
+        console.log("🤖 Querying OpenAI API (GPT-4o-mini)...");
+        const response = await axios.post('https://api.openai.com/v1/chat/completions', {
+          model: 'gpt-4o-mini',
+          messages: [{ role: 'user', content: prompt }]
+        }, {
+          headers: {
+            'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        technicalSolution = response.data.choices[0].message.content;
+        console.log("✅ Solution generated by OpenAI.");
+      } 
+      else {
+        console.log("⚠️ [WARNING] No cloud API key configured in .env. Falling back to local Ollama...");
+        console.log("🤖 Sending context to Local Ollama Instance...");
+        const ollamaResponse = await axios.post('http://localhost:11434/api/chat', {
+          model: "llama3",
+          messages: [{ role: "user", content: prompt }],
+          stream: false
+        });
+        technicalSolution = ollamaResponse.data.message.content;
+        console.log("✅ Solution generated by local LLM.");
+      }
+    } catch (llmErr) {
+      console.error("❌ LLM API Error:", llmErr.message);
+      if (llmErr.response && llmErr.response.data) {
+        console.error("Details:", JSON.stringify(llmErr.response.data));
+      }
+      technicalSolution = `❌ Error generating analysis: ${llmErr.message}.\n\n` + 
+        `Please verify that your API key is correct and you have an active internet connection.\n` + 
+        `If you are using local Ollama, ensure the Ollama service is running.`;
+    }
+
+    // Update our global state so the React frontend can read it
+    latestTicketAnalysis = {
+      title: `[${ticketKey}] ${title}`,
+      description: description,
+      solution: technicalSolution,
+      images: imagePaths
+    };
+
+    res.status(200).json({ status: "Success", analysis: latestTicketAnalysis });
+
+  } catch (error) {
+    console.error("Error handling webhook:", error.message);
+    res.status(500).send("Internal Server Error");
+  }
+});
+
+// 2. Frontend Polling Endpoint
+app.get('/api/latest-analysis', (req, res) => {
+  res.json(latestTicketAnalysis);
+});
+
+const PORT = 5001;
+app.listen(PORT, () => console.log(`🚀 Agent Backend running on http://localhost:${PORT}`));
