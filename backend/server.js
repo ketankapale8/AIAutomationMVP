@@ -124,9 +124,16 @@ const postCommentToJira = async (issueKey, commentText, issueSelfUrl) => {
   }
 };
 
-// 1. JIRA Webhook Listener Endpoint
 app.post('/api/jira-webhook', async (req, res) => {
   try {
+    const webhookEvent = req.body.webhookEvent;
+    
+    // Ignore comment and issue update webhooks to prevent infinite feedback loops
+    if (webhookEvent && webhookEvent !== "jira:issue_created") {
+      console.log(`ℹ️ Webhook event is '${webhookEvent}'. Ignoring to prevent loops.`);
+      return res.status(200).send(`Ignored webhook event: ${webhookEvent}`);
+    }
+
     const issue = req.body.issue;
     if (!issue) {
       return res.status(200).send("Not an issue creation event.");
