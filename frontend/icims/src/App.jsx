@@ -41,12 +41,12 @@ export default function App() {
     }
   }, [theme]);
 
-
   const fetchLatestData = async () => {
     try {
       const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5001';
       const response = await axios.get(`${backendUrl}/api/latest-analysis`);
       if (response.data) {
+        // Automatically check if the backend returned a new solution or is loading
         setData(response.data);
       }
     } catch (err) {
@@ -390,6 +390,9 @@ export default function App() {
                 </h4>
                 <div style={{ background: 'var(--inner-bg)', border: '1px solid var(--panel-border)', padding: '16px', borderRadius: '10px', fontSize: '14px', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', lineHeight: '1.5' }}>
                   {data.description}
+                </div>
+                <div style={{ marginTop: '8px', fontSize: '12px', color: 'var(--text-muted)', fontStyle: 'italic', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <span>✏️</span> Updates automatically when the ticket is edited on your Jira board.
                 </div>
               </div>
 
