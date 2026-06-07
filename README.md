@@ -29,6 +29,9 @@ sequenceDiagram
     FE-->>User: Auto-update UI dashboard (Glassmorphism layout)
 ```
 
+### Detailed Context Extraction Diagram
+![Context Extraction Diagram](docs/context_extraction_architecture.png)
+
 ---
 
 ## 🛠️ Technology Stack
