@@ -4,6 +4,7 @@ const cors = require('cors');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const app = express();
 app.use(cors());
@@ -35,6 +36,9 @@ let latestTicketAnalysis = {
   jiraUrl: ""
 };
 
+// In-memory dictionary to store multiple ticket analyses keyed by issue key (e.g. SCRUM-101)
+const ticketAnalyses = {};
+
 // Helper function to parse Atlassian Document Format (ADF) description into plain text
 function parseADF(node) {
   if (!node) return "";
@@ -47,6 +51,33 @@ function parseADF(node) {
     return parseADF(node.content);
   }
   return "";
+}
+
+// Helper function to optimize codebase context (remove comments, collapse newlines, and truncate length)
+function optimizeCodebaseContext(content) {
+  if (!content) return "";
+  
+  // 1. Remove comments (multi-line /* */ and single-line // not preceded by a colon to protect URL protocols)
+  let cleanContent = content.replace(/\/\*[\s\S]*?\*\/|([^:]|^)\/\/.*$/gm, '$1');
+  
+  // 2. Collapse whitespace (remove excess empty lines and trailing spaces)
+  let lines = cleanContent.split('\n');
+  let collapsed = lines
+    .map(line => line.trimEnd())
+    .filter((line, idx, arr) => {
+      if (line.trim() !== '') return true;
+      if (idx > 0 && arr[idx - 1].trim() !== '') return true;
+      return false;
+    })
+    .join('\n');
+  
+  // 3. Truncate file context length if it exceeds the limit
+  const maxLimit = parseInt(process.env.MAX_CONTEXT_FILE_SIZE, 10) || 6000;
+  if (collapsed.length > maxLimit) {
+    collapsed = collapsed.substring(0, maxLimit) + `\n\n... [Content Truncated to Save Tokens (Limit: ${maxLimit} chars)]`;
+  }
+  
+  return collapsed;
 }
 
 // Helper function to download Jira attachments
@@ -177,7 +208,8 @@ const processAnalysis = async (ticketKey, title, description, imagePaths, jiraUr
             const fileUrl = `https://raw.githubusercontent.com/${githubOwner}/${githubRepo}/${githubBranch}/${f.path}`;
             const contentRes = await axios.get(fileUrl, { headers });
             const content = typeof contentRes.data === 'object' ? JSON.stringify(contentRes.data, null, 2) : contentRes.data;
-            return `--- File: ${f.path} ---\n${content}`;
+            const optimizedContent = optimizeCodebaseContext(content);
+            return `--- File: ${f.path} ---\n${optimizedContent}`;
           } catch (fileErr) {
             console.error(`Failed to fetch file content for ${f.path}:`, fileErr.message);
             return `--- File: ${f.path} ---\n[Error fetching file content from GitHub]`;
@@ -243,7 +275,8 @@ const processAnalysis = async (ticketKey, title, description, imagePaths, jiraUr
         codebaseContext = selectedFiles.map(filePath => {
           const relativePath = path.relative(path.join(__dirname, '..', 'repo', 'nextjs-dnd'), filePath);
           const content = fs.readFileSync(filePath, 'utf8');
-          return `--- File: ${relativePath} ---\n${content}`;
+          const optimizedContent = optimizeCodebaseContext(content);
+          return `--- File: ${relativePath} ---\n${optimizedContent}`;
         }).join('\n\n');
       } else {
         codebaseContext = "No codebase files found in the source directory.";
@@ -383,12 +416,384 @@ const processAnalysis = async (ticketKey, title, description, imagePaths, jiraUr
     jiraUrl: jiraUrl
   };
 
+  ticketAnalyses[ticketKey] = latestTicketAnalysis;
+
   if (jiraUrl) {
     postCommentToJira(ticketKey, technicalSolution, jiraUrl);
   }
 };
 
-// 1. Webhook endpoint (Listens to creation and updates)
+// --- Slack & Jira Integration Helpers ---
+
+// Dynamic Jira issue details & comments fetcher
+const fetchJiraIssue = async (issueKey) => {
+  const email = process.env.JIRA_EMAIL;
+  const token = process.env.JIRA_API_TOKEN;
+  const domain = process.env.JIRA_DOMAIN || "your-domain.atlassian.net";
+  
+  if (!email || !token) {
+    console.warn("⚠️ JIRA_EMAIL or JIRA_API_TOKEN not configured. Cannot fetch Jira issue.");
+    return null;
+  }
+  
+  try {
+    const url = `https://${domain}/rest/api/2/issue/${issueKey}`;
+    const auth = Buffer.from(`${email}:${token}`).toString('base64');
+    
+    console.log(`🔍 Fetching issue details from Jira for ${issueKey}...`);
+    const response = await axios.get(url, {
+      headers: {
+        'Authorization': `Basic ${auth}`,
+        'Accept': 'application/json'
+      }
+    });
+    
+    const issue = response.data;
+    const title = issue.fields.summary;
+    const rawDescription = issue.fields.description || "No description provided.";
+    const description = typeof rawDescription === 'object' ? parseADF(rawDescription) : rawDescription;
+    
+    // Extract comment history
+    const commentsObj = issue.fields.comment || {};
+    const comments = commentsObj.comments || [];
+    const commentHistory = comments.map(c => {
+      const author = c.author ? c.author.displayName : "Unknown User";
+      const body = typeof c.body === 'object' ? parseADF(c.body) : c.body;
+      return `[${c.created}] ${author}: ${body}`;
+    });
+    
+    return {
+      key: issueKey,
+      title,
+      description,
+      commentHistory,
+      jiraUrl: `https://${domain}/browse/${issueKey}`,
+      selfUrl: issue.self
+    };
+  } catch (err) {
+    console.error(`❌ Failed to fetch issue ${issueKey} from Jira:`, err.message);
+    return null;
+  }
+};
+
+// JQL Issue Searcher
+const searchJiraIssues = async (queryText) => {
+  const email = process.env.JIRA_EMAIL;
+  const token = process.env.JIRA_API_TOKEN;
+  const domain = process.env.JIRA_DOMAIN || "your-domain.atlassian.net";
+  
+  if (!email || !token) {
+    console.warn("⚠️ JIRA_EMAIL or JIRA_API_TOKEN not configured. Cannot search Jira.");
+    return [];
+  }
+  
+  try {
+    const url = `https://${domain}/rest/api/2/search`;
+    const auth = Buffer.from(`${email}:${token}`).toString('base64');
+    const jql = `text ~ "${queryText.replace(/"/g, '\\"')}"`;
+    
+    console.log(`🔍 Searching Jira issues with JQL: ${jql}...`);
+    const response = await axios.post(url, {
+      jql,
+      maxResults: 5,
+      fields: ["summary", "description", "status"]
+    }, {
+      headers: {
+        'Authorization': `Basic ${auth}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    const issues = response.data.issues || [];
+    return issues.map(issue => {
+      const rawDesc = issue.fields.description || "";
+      const desc = typeof rawDesc === 'object' ? parseADF(rawDesc) : rawDesc;
+      return {
+        key: issue.key,
+        title: issue.fields.summary,
+        description: desc,
+        status: issue.fields.status ? issue.fields.status.name : "Unknown",
+        jiraUrl: `https://${domain}/browse/${issue.key}`
+      };
+    });
+  } catch (err) {
+    console.error(`❌ Failed to search Jira issues:`, err.message);
+    return [];
+  }
+};
+
+// Verification check for Slack request signatures
+const verifySlackSignature = (req) => {
+  const signature = req.headers['x-slack-signature'];
+  const timestamp = req.headers['x-slack-request-timestamp'];
+  const secret = process.env.SLACK_SIGNING_SECRET;
+  
+  if (!secret) {
+    return true; // Bypass in dev if not set
+  }
+  
+  if (!signature || !timestamp) return false;
+  
+  const fiveMinutesAgo = Math.floor(Date.now() / 1000) - 60 * 5;
+  if (timestamp < fiveMinutesAgo) return false;
+  
+  try {
+    const sigBaseString = `v0:${timestamp}:${JSON.stringify(req.body)}`;
+    const mySignature = 'v0=' + crypto
+      .createHmac('sha256', secret)
+      .update(sigBaseString, 'utf8')
+      .digest('hex');
+      
+    return crypto.timingSafeEqual(
+      Buffer.from(mySignature, 'utf8'),
+      Buffer.from(signature, 'utf8')
+    );
+  } catch (err) {
+    console.error("Error verifying Slack signature:", err.message);
+    return false;
+  }
+};
+
+// Helper to post messages to Slack
+const postMessageToSlack = async (channel, text) => {
+  const token = process.env.SLACK_BOT_TOKEN;
+  if (!token) {
+    console.warn("⚠️ SLACK_BOT_TOKEN not configured. Skipping posting message to Slack.");
+    return;
+  }
+  
+  try {
+    await axios.post('https://slack.com/api/chat.postMessage', {
+      channel,
+      text
+    }, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    console.log(`✅ Message posted to Slack channel ${channel}.`);
+  } catch (err) {
+    console.error(`❌ Failed to post message to Slack channel ${channel}:`, err.message);
+    if (err.response && err.response.data) {
+      console.error("Slack error details:", JSON.stringify(err.response.data));
+    }
+  }
+};
+
+// Set to avoid duplicate processing of Slack events due to retries
+const processedEvents = new Set();
+
+// Asynchronous Slack event handler
+const handleSlackEvent = async (event, eventId) => {
+  if (eventId && processedEvents.has(eventId)) {
+    console.log(`ℹ️ Slack Event ${eventId} already processed. Skipping.`);
+    return;
+  }
+  if (eventId) {
+    processedEvents.add(eventId);
+    if (processedEvents.size > 1000) {
+      processedEvents.delete(processedEvents.keys().next().value);
+    }
+  }
+
+  if (event.bot_id || event.subtype === 'bot_message') {
+    return; // Skip messages sent by bots
+  }
+
+  const channel = event.channel;
+  const userText = event.text || "";
+  
+  console.log(`⚡ Processing Slack command: "${userText}" in channel ${channel}`);
+
+  try {
+    // 1. Search command checking
+    const searchMatch = userText.match(/(?:search|find)\s+["']?([^"']+)["']?/i);
+    if (searchMatch) {
+      const queryText = searchMatch[1];
+      await postMessageToSlack(channel, `🔍 Searching Jira for issues matching *"${queryText}"*...`);
+      
+      const foundIssues = await searchJiraIssues(queryText);
+      if (foundIssues.length === 0) {
+        await postMessageToSlack(channel, `❌ No issues matching *"${queryText}"* found in Jira.`);
+      } else {
+        const issueList = foundIssues.map(issue => {
+          return `• *[${issue.key}]* <${issue.jiraUrl}|${issue.title}>\n  Status: _${issue.status}_\n  Description: _${issue.description.substring(0, 100)}..._`;
+        }).join('\n\n');
+        await postMessageToSlack(channel, `✨ Found ${foundIssues.length} matching Jira issue(s):\n\n${issueList}`);
+      }
+      return;
+    }
+
+    // 2. Jira Ticket Key identification
+    const ticketKeyMatch = userText.match(/([A-Z]+-\d+)/i);
+    let ticketKey = null;
+    let ticketData = null;
+
+    if (ticketKeyMatch) {
+      ticketKey = ticketKeyMatch[1].toUpperCase();
+      console.log(`🔍 Slack query refers to Jira Key: ${ticketKey}`);
+      
+      ticketData = ticketAnalyses[ticketKey];
+      
+      if (!ticketData) {
+        await postMessageToSlack(channel, `🔍 Ticket *${ticketKey}* not cached in backend memory. Fetching from Jira...`);
+        ticketData = await fetchJiraIssue(ticketKey);
+        
+        if (!ticketData) {
+          await postMessageToSlack(channel, `❌ Could not find ticket *${ticketKey}* in Jira. Please verify the ticket key.`);
+          return;
+        }
+        
+        await postMessageToSlack(channel, `🤖 Performing technical code analysis for *${ticketKey}*...`);
+        try {
+          await processAnalysis(ticketKey, ticketData.title, ticketData.description, [], ticketData.selfUrl);
+          ticketData = ticketAnalyses[ticketKey];
+        } catch (analysisErr) {
+          console.error("Failed to generate analysis for ticket:", analysisErr.message);
+          ticketData.solution = `Failed to generate codebase analysis: ${analysisErr.message}`;
+        }
+      }
+    } else {
+      // 3. Fallback: answer based on latest analyzed ticket
+      if (latestTicketAnalysis && latestTicketAnalysis.key) {
+        ticketKey = latestTicketAnalysis.key;
+        ticketData = latestTicketAnalysis;
+        await postMessageToSlack(channel, `ℹ️ No Jira key found. Answering based on the latest analyzed ticket: *${ticketKey}*.`);
+      } else {
+        await postMessageToSlack(channel, `👋 Hello! I can help you analyze codebase tickets. Please specify a Jira ticket key (e.g. *SCRUM-101*) or search for topics using \`search "query"\`.`);
+        return;
+      }
+    }
+
+    // 4. Query the LLM with context
+    await postMessageToSlack(channel, `🤖 Formulating response using ticket context and history for *${ticketKey}*...`);
+    
+    const prompt = `
+      You are an expert AI Technical Assistant (IVA Slackbot). You are answering a developer's question in a Slack channel about a Jira ticket and codebase analysis.
+      
+      Jira Ticket Key: ${ticketData.key || ticketKey}
+      Ticket Title: ${ticketData.title || ticketData.rawTitle || "Unknown"}
+      Ticket Description: ${ticketData.description || "No description provided."}
+      
+      ${ticketData.commentHistory && ticketData.commentHistory.length > 0 ? `Jira Ticket Comment History:\n${ticketData.commentHistory.join('\n')}\n` : ''}
+      
+      ${ticketData.solution ? `Previous Technical Analysis:\n${ticketData.solution}\n` : ''}
+      
+      User's Slack Question: ${userText}
+      
+      Please answer the user's question directly, accurately, and concisely. Keep it under 250 words.
+      Use standard markdown for formatting. If code suggestions are required, keep them very brief.
+    `;
+
+    let replyText = "";
+    
+    try {
+      if (process.env.DEEPSEEK_API_KEY) {
+        const response = await axios.post('https://api.deepseek.com/v1/chat/completions', {
+          model: 'deepseek-chat',
+          messages: [{ role: 'user', content: prompt }]
+        }, {
+          headers: {
+            'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        replyText = response.data.choices[0].message.content;
+      }
+      else if (process.env.GEMINI_API_KEY) {
+        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
+        const response = await axios.post(geminiUrl, {
+          contents: [{
+            parts: [{ text: prompt }]
+          }]
+        });
+        if (response.data && response.data.candidates && response.data.candidates[0].content && response.data.candidates[0].content.parts) {
+          replyText = response.data.candidates[0].content.parts[0].text;
+        } else {
+          throw new Error("Unexpected Gemini API response structure.");
+        }
+      } 
+      else if (process.env.GROQ_API_KEY) {
+        const response = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
+          model: 'llama-3.1-8b-instant',
+          messages: [{ role: 'user', content: prompt }]
+        }, {
+          headers: {
+            'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        replyText = response.data.choices[0].message.content;
+      } 
+      else if (process.env.OPENAI_API_KEY) {
+        const response = await axios.post('https://api.openai.com/v1/chat/completions', {
+          model: 'gpt-4o-mini',
+          messages: [{ role: 'user', content: prompt }]
+        }, {
+          headers: {
+            'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        replyText = response.data.choices[0].message.content;
+      } 
+      else {
+        const response = await axios.post('http://localhost:11434/api/chat', {
+          model: "llama3",
+          messages: [{ role: "user", content: prompt }],
+          stream: false
+        });
+        replyText = response.data.message.content;
+      }
+    } catch (llmErr) {
+      console.error("LLM Error during Slack response generation:", llmErr.message);
+      replyText = `❌ Error generating answer from LLM: ${llmErr.message}`;
+    }
+
+    await postMessageToSlack(channel, replyText);
+
+  } catch (err) {
+    console.error("Error processing Slack event:", err.message);
+    await postMessageToSlack(channel, `❌ Sorry, an error occurred while processing your request: ${err.message}`);
+  }
+};
+
+// --- Endpoint Handlers ---
+
+// 1. Slack Events Webhook Endpoint
+app.post('/api/slack/events', async (req, res) => {
+  try {
+    if (req.body.type === 'url_verification') {
+      console.log("⚡ Received Slack URL Verification challenge.");
+      return res.status(200).json({ challenge: req.body.challenge });
+    }
+
+    if (!verifySlackSignature(req)) {
+      console.warn("⚠️ Slack signature verification failed.");
+      if (process.env.NODE_ENV === 'production') {
+        return res.status(401).send("Invalid signature");
+      }
+    }
+
+    const event = req.body.event;
+    const eventId = req.body.event_id;
+    
+    if (event) {
+      res.status(200).send("Accepted");
+      handleSlackEvent(event, eventId);
+    } else {
+      res.status(200).send("No event body.");
+    }
+  } catch (error) {
+    console.error("Error handling Slack event webhook:", error.message);
+    if (!res.headersSent) {
+      res.status(500).send("Internal Server Error");
+    }
+  }
+});
+
+// 2. Jira Webhook endpoint (Listens to creation and updates)
 app.post('/api/jira-webhook', async (req, res) => {
   try {
     const webhookEvent = req.body.webhookEvent;
