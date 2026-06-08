@@ -8,7 +8,11 @@ const crypto = require('crypto');
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({
+  verify: (req, res, buf, encoding) => {
+    req.rawBody = buf;
+  }
+}));
 
 // Load environment variables manually from .env if it exists
 if (fs.existsSync(path.join(__dirname, '.env'))) {
@@ -538,7 +542,8 @@ const verifySlackSignature = (req) => {
   if (timestamp < fiveMinutesAgo) return false;
   
   try {
-    const sigBaseString = `v0:${timestamp}:${JSON.stringify(req.body)}`;
+    const rawBodyStr = req.rawBody ? req.rawBody.toString('utf8') : JSON.stringify(req.body);
+    const sigBaseString = `v0:${timestamp}:${rawBodyStr}`;
     const mySignature = 'v0=' + crypto
       .createHmac('sha256', secret)
       .update(sigBaseString, 'utf8')
