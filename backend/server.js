@@ -433,7 +433,8 @@ const processAnalysis = async (ticketKey, title, description, imagePaths, jiraUr
 const fetchJiraIssue = async (issueKey) => {
   const email = process.env.JIRA_EMAIL;
   const token = process.env.JIRA_API_TOKEN;
-  const domain = process.env.JIRA_DOMAIN || "your-domain.atlassian.net";
+  const rawDomain = process.env.JIRA_DOMAIN || "your-domain.atlassian.net";
+  const domain = rawDomain.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
   
   if (!email || !token) {
     console.warn("⚠️ JIRA_EMAIL or JIRA_API_TOKEN not configured. Cannot fetch Jira issue.");
@@ -484,7 +485,8 @@ const fetchJiraIssue = async (issueKey) => {
 const searchJiraIssues = async (queryText) => {
   const email = process.env.JIRA_EMAIL;
   const token = process.env.JIRA_API_TOKEN;
-  const domain = process.env.JIRA_DOMAIN || "your-domain.atlassian.net";
+  const rawDomain = process.env.JIRA_DOMAIN || "your-domain.atlassian.net";
+  const domain = rawDomain.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
   
   if (!email || !token) {
     console.warn("⚠️ JIRA_EMAIL or JIRA_API_TOKEN not configured. Cannot search Jira.");
