@@ -6,6 +6,10 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
+const embeddings = require('./embeddings');
+const vectorStore = require('./vectorStore');
+const { indexFile } = require('./indexer');
+
 const app = express();
 app.use(cors());
 app.use(express.json({
@@ -161,134 +165,25 @@ const postCommentToJira = async (issueKey, commentText, issueSelfUrl) => {
 // Reusable core analysis worker function
 const processAnalysis = async (ticketKey, title, description, imagePaths, jiraUrl) => {
   let codebaseContext = "";
-  const githubOwner = process.env.GITHUB_OWNER;
-  const githubRepo = process.env.GITHUB_REPO;
-  const githubToken = process.env.GITHUB_TOKEN;
-  const githubBranch = process.env.GITHUB_BRANCH || "main";
 
-  if (githubToken && githubOwner && githubRepo) {
-    console.log(`🔍 Querying GitHub API for repository: ${githubOwner}/${githubRepo} (${githubBranch})...`);
-    try {
-      const treeUrl = `https://api.github.com/repos/${githubOwner}/${githubRepo}/git/trees/${githubBranch}?recursive=1`;
-      const headers = {
-        'Authorization': `token ${githubToken}`,
-        'Accept': 'application/vnd.github.v3+json',
-        'User-Agent': 'ICIMS-AI-Agent'
-      };
-
-      const treeResponse = await axios.get(treeUrl, { headers });
-      const files = treeResponse.data.tree || [];
-
-      const allFiles = files.filter(f => 
-        f.type === 'blob' && 
-        f.path.startsWith('src/') && 
-        ['.tsx', '.ts', '.jsx', '.js', '.css', '.json'].includes(path.extname(f.path))
-      );
-
-      const ticketText = `${title} ${description}`.toLowerCase();
-      let selectedFiles = allFiles.filter(f => {
-        const baseName = path.basename(f.path).toLowerCase();
-        const nameWithoutExt = path.basename(f.path, path.extname(f.path)).toLowerCase();
-        return ticketText.includes(baseName) || ticketText.includes(nameWithoutExt);
-      });
-
-      if (selectedFiles.length === 0) {
-        selectedFiles = allFiles.filter(f => {
-          const baseName = path.basename(f.path);
-          return ['page.tsx', 'SortableLinks.tsx'].includes(baseName);
-        });
-      }
-
-      console.log(`🔍 GitHub API: Selected ${selectedFiles.length} files matching context:`, selectedFiles.map(f => f.path));
-
-      if (selectedFiles.length > 3) {
-        console.log(`⚠️ Too many files selected (${selectedFiles.length}). Limiting to top 3 matching files to prevent Groq rate limits...`);
-        selectedFiles = selectedFiles.slice(0, 3);
-      }
-
-      if (selectedFiles.length > 0) {
-        const contentsPromise = selectedFiles.map(async f => {
-          try {
-            const fileUrl = `https://raw.githubusercontent.com/${githubOwner}/${githubRepo}/${githubBranch}/${f.path}`;
-            const contentRes = await axios.get(fileUrl, { headers });
-            const content = typeof contentRes.data === 'object' ? JSON.stringify(contentRes.data, null, 2) : contentRes.data;
-            const optimizedContent = optimizeCodebaseContext(content);
-            return `--- File: ${f.path} ---\n${optimizedContent}`;
-          } catch (fileErr) {
-            console.error(`Failed to fetch file content for ${f.path}:`, fileErr.message);
-            return `--- File: ${f.path} ---\n[Error fetching file content from GitHub]`;
-          }
-        });
-        const contents = await Promise.all(contentsPromise);
-        codebaseContext = contents.join('\n\n');
-      } else {
-        codebaseContext = "No relevant codebase files found in the specified GitHub repository.";
-      }
-    } catch (err) {
-      console.error("Error fetching repository from GitHub API:", err.message);
-      codebaseContext = `Error reading codebase files from GitHub API: ${err.message}`;
-    }
-  } else {
-    console.log("⚠️ GitHub credentials not found in env. Falling back to local filesystem scan...");
+  try {
+    const queryText = `Title: ${title}\nDescription: ${description}`;
+    console.log(`🤖 Generating query embedding for ticket: "${title}"...`);
+    const queryEmbedding = await embeddings.embedText(queryText);
     
-    const scanDir = (dir, fileList = []) => {
-      if (!fs.existsSync(dir)) return fileList;
-      const files = fs.readdirSync(dir);
-      files.forEach(file => {
-        const filePath = path.join(dir, file);
-        const stat = fs.statSync(filePath);
-        if (stat.isDirectory()) {
-          if (file !== 'node_modules' && file !== '.git' && file !== '.next') {
-            scanDir(filePath, fileList);
-          }
-        } else {
-          const ext = path.extname(file);
-          if (['.tsx', '.ts', '.jsx', '.js', '.css', '.json'].includes(ext)) {
-            fileList.push(filePath);
-          }
-        }
-      });
-      return fileList;
-    };
-
-    const repoPath = path.join(__dirname, '..', 'repo', 'nextjs-dnd', 'src');
-    try {
-      const allFiles = scanDir(repoPath);
-      const ticketText = `${title} ${description}`.toLowerCase();
-      let selectedFiles = allFiles.filter(filePath => {
-        const baseName = path.basename(filePath).toLowerCase();
-        const nameWithoutExt = path.basename(filePath, path.extname(filePath)).toLowerCase();
-        return ticketText.includes(baseName) || ticketText.includes(nameWithoutExt);
-      });
-
-      if (selectedFiles.length === 0) {
-        selectedFiles = allFiles.filter(filePath => {
-          const baseName = path.basename(filePath);
-          return ['page.tsx', 'SortableLinks.tsx'].includes(baseName);
-        });
-      }
-
-      console.log(`🔍 Local scan: Selected ${selectedFiles.length} files for context:`, selectedFiles.map(fp => path.relative(repoPath, fp)));
-
-      if (selectedFiles.length > 3) {
-        console.log(`⚠️ Too many files selected (${selectedFiles.length}). Limiting to top 3 matching files to prevent API rate limits...`);
-        selectedFiles = selectedFiles.slice(0, 3);
-      }
-
-      if (selectedFiles.length > 0) {
-        codebaseContext = selectedFiles.map(filePath => {
-          const relativePath = path.relative(path.join(__dirname, '..', 'repo', 'nextjs-dnd'), filePath);
-          const content = fs.readFileSync(filePath, 'utf8');
-          const optimizedContent = optimizeCodebaseContext(content);
-          return `--- File: ${relativePath} ---\n${optimizedContent}`;
-        }).join('\n\n');
-      } else {
-        codebaseContext = "No codebase files found in the source directory.";
-      }
-    } catch (err) {
-      console.error("Error scanning repository:", err.message);
-      codebaseContext = "Error reading codebase files.";
+    console.log("🔍 Querying local vector store for relevant code chunks...");
+    const chunks = vectorStore.similaritySearch(queryEmbedding, 15);
+    
+    if (chunks && chunks.length > 0) {
+      codebaseContext = chunks.map(chunk => {
+        return `--- File: ${chunk.filePath} (Lines: ${chunk.startLine}-${chunk.endLine}) ---\n${chunk.content}`;
+      }).join('\n\n');
+    } else {
+      codebaseContext = "No relevant codebase files found. Please make sure the repository is indexed using 'npm run index'.";
     }
+  } catch (err) {
+    console.error("❌ Failed to query vector store:", err.message);
+    codebaseContext = `Error retrieving codebase context: ${err.message}`;
   }
 
   const attachmentInfoText = imagePaths && imagePaths.length > 0
@@ -454,6 +349,10 @@ const fetchJiraIssue = async (issueKey) => {
     });
     
     const issue = response.data;
+    if (!issue || !issue.fields) {
+      const respStr = typeof issue === 'string' ? issue : JSON.stringify(issue);
+      throw new Error(`Jira API returned response without fields: ${respStr.substring(0, 200)}`);
+    }
     const title = issue.fields.summary;
     const rawDescription = issue.fields.description || "No description provided.";
     const description = typeof rawDescription === 'object' ? parseADF(rawDescription) : rawDescription;
@@ -477,7 +376,7 @@ const fetchJiraIssue = async (issueKey) => {
     };
   } catch (err) {
     console.error(`❌ Failed to fetch issue ${issueKey} from Jira:`, err.message);
-    return null;
+    return { error: err.message };
   }
 };
 
@@ -647,8 +546,9 @@ const handleSlackEvent = async (event, eventId) => {
         await postMessageToSlack(channel, `🔍 Ticket *${ticketKey}* not cached in backend memory. Fetching from Jira...`);
         ticketData = await fetchJiraIssue(ticketKey);
         
-        if (!ticketData) {
-          await postMessageToSlack(channel, `❌ Could not find ticket *${ticketKey}* in Jira. Please verify the ticket key.`);
+        if (!ticketData || ticketData.error) {
+          const errorMsg = ticketData && ticketData.error ? `: _${ticketData.error}_` : ". Please verify the ticket key.";
+          await postMessageToSlack(channel, `❌ Could not find ticket *${ticketKey}* in Jira${errorMsg}`);
           return;
         }
         
@@ -797,6 +697,106 @@ app.post('/api/slack/events', async (req, res) => {
     if (!res.headersSent) {
       res.status(500).send("Internal Server Error");
     }
+  }
+});
+
+// 3. Git Webhook Endpoint (Incremental Updates)
+app.post('/api/git-webhook', async (req, res) => {
+  try {
+    // GitHub webhook ping challenge
+    if (req.body.zen) {
+      console.log("⚡ Received GitHub webhook ping.");
+      return res.status(200).send("GitHub webhook ping received successfully");
+    }
+
+    console.log("⚡ Git Webhook Triggered: Processing changes...");
+
+    const commits = req.body.commits || [];
+    const addedFiles = new Set();
+    const modifiedFiles = new Set();
+    const deletedFiles = new Set();
+
+    commits.forEach(commit => {
+      if (commit.added) commit.added.forEach(f => addedFiles.add(f));
+      if (commit.modified) commit.modified.forEach(f => modifiedFiles.add(f));
+      if (commit.removed) commit.removed.forEach(f => deletedFiles.add(f));
+    });
+
+    // Support flat formats in body for easier mocking/testing
+    if (req.body.added) req.body.added.forEach(f => addedFiles.add(f));
+    if (req.body.modified) req.body.modified.forEach(f => modifiedFiles.add(f));
+    if (req.body.removed) req.body.removed.forEach(f => deletedFiles.add(f));
+
+    const githubOwner = process.env.GITHUB_OWNER;
+    const githubRepo = process.env.GITHUB_REPO;
+    const githubToken = process.env.GITHUB_TOKEN;
+    const githubBranch = process.env.GITHUB_BRANCH || "main";
+
+    // 1. Handle deleted files
+    for (const file of deletedFiles) {
+      if (file.startsWith('src/')) {
+        console.log(`🗑️ Git Webhook: File deleted, removing from index: ${file}`);
+        vectorStore.removeDocumentsForFile(file);
+      }
+    }
+
+    // 2. Handle modified and added files
+    const filesToUpdate = new Set([...addedFiles, ...modifiedFiles]);
+    
+    for (const file of filesToUpdate) {
+      if (!file.startsWith('src/')) continue;
+      
+      const ext = path.extname(file);
+      if (!['.tsx', '.ts', '.jsx', '.js', '.css', '.json'].includes(ext)) continue;
+
+      console.log(`⚡ Git Webhook: File added/modified, updating index: ${file}`);
+      
+      let content = "";
+      if (githubToken && githubOwner && githubRepo) {
+        // Fetch from GitHub
+        try {
+          const fileUrl = `https://raw.githubusercontent.com/${githubOwner}/${githubRepo}/${githubBranch}/${file}`;
+          const headers = {
+            'Authorization': `token ${githubToken}`,
+            'Accept': 'application/vnd.github.v3+json',
+            'User-Agent': 'ICIMS-AI-Agent-Webhook'
+          };
+          const contentRes = await axios.get(fileUrl, { headers });
+          content = typeof contentRes.data === 'object' ? JSON.stringify(contentRes.data, null, 2) : contentRes.data;
+        } catch (githubErr) {
+          console.error(`❌ Git Webhook: Failed to fetch file ${file} from GitHub:`, githubErr.message);
+          continue;
+        }
+      } else {
+        // Read from local filesystem
+        const localRepoPath = process.env.REPO_PATH || path.join(__dirname, '..', 'repo', 'nextjs-dnd');
+        const fullPath = path.join(localRepoPath, file);
+        if (fs.existsSync(fullPath)) {
+          try {
+            content = fs.readFileSync(fullPath, 'utf8');
+          } catch (fsErr) {
+            console.error(`❌ Git Webhook: Failed to read local file ${fullPath}:`, fsErr.message);
+            continue;
+          }
+        } else {
+          console.warn(`⚠️ Git Webhook: Local file does not exist at ${fullPath}. Skipping index update.`);
+          continue;
+        }
+      }
+
+      // Index the file (this automatically removes old chunks and adds new ones)
+      await indexFile(file, content);
+    }
+
+    res.status(200).json({
+      status: "Success",
+      added: Array.from(addedFiles),
+      modified: Array.from(modifiedFiles),
+      removed: Array.from(deletedFiles)
+    });
+  } catch (error) {
+    console.error("❌ Error handling Git webhook:", error.message);
+    res.status(500).send("Internal Server Error");
   }
 });
 
