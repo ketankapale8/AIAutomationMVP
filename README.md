@@ -1,36 +1,48 @@
-# Agentic JIRA Ticket Technical Analyzer (ICIMS MVP)
+# Agentic JIRA Ticket Technical Analyzer (Scalable RAG Edition)
 
-An automated technical analysis engine that intercepts Jira issue creation events in real-time, scans target codebase files directly from the GitHub API, and leverages high-speed Cloud LLMs (via Groq/Gemini/DeepSeek) to generate instant code-level recommendations and architectural solutions.
+An automated technical analysis engine that intercepts Jira issue creation events in real-time, queries a local semantic vector database to retrieve context-aware code chunks (avoiding full repository scans), and leverages high-speed Cloud LLMs (via Groq/Gemini/DeepSeek/OpenAI) to generate instant code-level recommendations and architectural solutions.
 
 ---
 
 ## 🚀 Architectural Workflow
 
+### Efficient RAG System (Two-Phase Execution)
 ```mermaid
 sequenceDiagram
-    actor User as Developer / Manager
+    actor Dev as Developer / Git Push
+    actor User as Product / Project Manager
     participant Jira as Atlassian Jira Cloud
-    participant Backend as Node/Express Backend (Render)
-    participant GH as GitHub API
+    participant Webhook as /api/git-webhook
+    participant Indexer as Offline Indexer (indexer.js)
+    participant VectorDB as Vector Database (vector_store.json)
+    participant Backend as Node/Express Backend (/api/jira-webhook)
     participant LLM as Groq / Gemini / DeepSeek API
-    participant FE as Vite/React Frontend (Vercel)
 
-    User->>Jira: Create / Add ticket to Scrum Board
-    Jira->>Backend: POST Webhook event (/api/jira-webhook)
-    Backend->>GH: Get project tree & fetch matched codebase files
-    GH-->>Backend: Return file tree & content context
-    Backend->>LLM: Send structured prompt (Ticket info + Code context)
-    LLM-->>Backend: Return technical analysis & code fixes
-    Backend->>Backend: Update in-memory ticket analysis state
-    loop Polling every 3 seconds
-        FE->>Backend: GET (/api/latest-analysis)
-        Backend-->>FE: Return latest ticket analysis data
-    end
-    FE-->>User: Auto-update UI dashboard (Glassmorphism layout)
+    %% Phase 1: Offline Indexing
+    Note over Dev, VectorDB: Phase 1: Codebase Indexing (Offline or Real-time Git push)
+    Dev->>Indexer: Run indexer (npm run index)
+    Indexer->>Indexer: Split code into overlapping chunks (chunker.js)
+    Indexer->>LLM: Generate code embeddings (embeddings.js)
+    LLM-->>Indexer: Return vectors
+    Indexer->>VectorDB: Save chunks + embeddings + metadata
+    
+    %% Phase 1b: Webhook Synch
+    Dev->>Webhook: git push commits
+    Webhook->>VectorDB: Delete stale chunks for modified files
+    Webhook->>Indexer: Re-index modified files incrementally
+    
+    %% Phase 2: Per-Ticket Analysis
+    Note over User, LLM: Phase 2: Jira Webhook Analysis (Online / Per-ticket)
+    User->>Jira: Create / Edit Scrum Board Ticket
+    Jira->>Backend: Post webhook event
+    Backend->>LLM: 1. Generate query embedding for ticket text
+    LLM-->>Backend: Return query vector
+    Backend->>VectorDB: 2. Query top-k relevant code chunks (Cosine Similarity)
+    VectorDB-->>Backend: Return top 15 matching snippets with line numbers
+    Backend->>LLM: 3. Send prompt (Ticket + Relevant Chunks context)
+    LLM-->>Backend: Return final technical analysis & code fixes
+    Backend->>Jira: Post comment back to ticket
 ```
-
-### Detailed Context Extraction Diagram
-![Context Extraction Diagram](docs/context_extraction_architecture.png)
 
 ---
 
@@ -38,10 +50,13 @@ sequenceDiagram
 
 * **Frontend**: React (Vite), Glassmorphism styling system, Axios polling.
 * **Backend**: Node.js, Express, Axios client.
+* **Semantic Search Engine**:
+  * **Chuncker**: Custom lines-aware code splitter with overlap bounds.
+  * **Embeddings Handler**: Multi-provider wrapper supporting OpenAI (`text-embedding-3-small`), Google Gemini (`text-embedding-004`), and local Ollama (`nomic-embed-text`).
+  * **Local Vector Store**: Built-in Javascript vector engine executing high-speed in-memory cosine similarity checks, persisted in `vector_store.json` (zero native C++ dependencies for seamless Windows compatibility).
 * **Integrations**:
   * **Jira Webhooks**: Real-time HTTP trigger events.
-  * **GitHub REST API**: On-demand repository files extraction.
-  * **LLM Provider**: Native integrations with **Groq Cloud** (Llama 3.1), **Google Gemini** (1.5 Flash), or **DeepSeek** (deepseek-chat).
+  * **Git Push Webhooks**: Real-time incremental source index synchronizations.
 
 ---
 
@@ -50,17 +65,25 @@ sequenceDiagram
 Create a `.env` file inside the `backend/` folder based on `backend/.env.example`:
 
 ```env
-# 1. Choose your preferred LLM Provider (The backend prioritizes keys in this order)
+# 1. LLM API Key (Backend uses this key order for embeddings & content)
 DEEPSEEK_API_KEY=your_deepseek_api_key
 GEMINI_API_KEY=your_gemini_api_key
 GROQ_API_KEY=your_groq_api_key
 OPENAI_API_KEY=your_openai_api_key
 
-# 2. GitHub REST API Access (Enables cloud-based codebase scanning)
+# 2. GitHub REST API Access (For Cloud Indexing - Option A)
 GITHUB_TOKEN=your_github_personal_access_token
 GITHUB_OWNER=your_github_username_or_org
 GITHUB_REPO=your_target_repository_name
 GITHUB_BRANCH=main
+
+# 3. Local Workspace Path (For Local Files Indexing - Option B)
+# If left blank, defaults to '../repo/nextjs-dnd/src'
+REPO_PATH=c:\AIAutomationMVP\repo\nextjs-dnd\src
+
+# 4. Local Ollama Fallback Settings (If no cloud API keys are present)
+OLLAMA_EMBED_URL=http://localhost:11434/api/embeddings
+OLLAMA_EMBED_MODEL=nomic-embed-text
 ```
 
 ---
@@ -68,19 +91,33 @@ GITHUB_BRANCH=main
 ## 💻 Local Development Setup
 
 ### 1. Backend Server Setup
-Navigate to the `backend` folder:
+Navigate to the `backend` folder and install dependencies:
 ```bash
 cd backend
 npm install
-# Configure your .env file
+```
+
+### 2. Run Codebase Indexing (Offline/Initial Setup)
+Ensure you have either a cloud API key configured in `.env` (Gemini or OpenAI) or local Ollama running with the `nomic-embed-text` model:
+```bash
+# To run Ollama locally
+ollama pull nomic-embed-text
+
+# Index the codebase
+npm run index
+```
+*This will create the codebase cache file `vector_store.json` inside the `backend/` directory.*
+
+### 3. Start the Backend Server
+```bash
 npm start
 ```
 *The server will run on `http://localhost:5001`.*
 
-### 2. Frontend Dashboard Setup
+### 4. Start the Frontend Dashboard
 Navigate to the `frontend/icims` folder:
 ```bash
-cd frontend/icims
+cd ../frontend/icims
 npm install
 npm run dev
 ```
@@ -88,30 +125,16 @@ npm run dev
 
 ---
 
-## ☁️ Cloud Deployment Guide
-
-This MVP is fully optimized for zero-cost cloud deployment:
-
-### Backend Deployment (Render.com)
-1. Deploy as a **Web Service** connected to your GitHub repository.
-2. Configure settings:
-   - **Root Directory**: `backend`
-   - **Build Command**: `npm install`
-   - **Start Command**: `node server.js`
-3. Enter your **Environment Variables** in the Render settings page (`GROQ_API_KEY`, `GITHUB_TOKEN`, etc.).
-4. *Optional*: Set up a free HTTPS ping on [UptimeRobot](https://uptimerobot.com/) targeting your Render URL `/api/latest-analysis` every 10 minutes to prevent the Render free-tier from entering sleep mode.
-
-### Frontend Deployment (Vercel)
-1. Import your repository into **Vercel**.
-2. Configure settings:
-   - **Root Directory**: `frontend/icims`
-   - **Framework Preset**: `Vite`
-3. Add the build environment variable:
-   - **`VITE_BACKEND_URL`** = `https://<your-render-app-name>.onrender.com`
-4. Click **Deploy**.
+## ☁️ Cloud Deployment & Webhooks
 
 ### Jira Webhook Setup
 1. In your Atlassian Jira Cloud instance, go to **Jira Settings > System > Webhooks**.
-2. Click **Create a Webhook**.
-3. Set the **URL** to: `https://<your-render-app-name>.onrender.com/api/jira-webhook`.
-4. Check **Issue: Created** under the Trigger Events list and click **Save**.
+2. Set the **URL** to: `https://<your-backend-domain>/api/jira-webhook`.
+3. Check **Issue: Created** and **Issue: Updated** under the Trigger Events list and click **Save**.
+
+### Git Push Webhook Setup (Incremental Updates)
+To sync your database instantly when new code commits are pushed:
+1. In your GitHub repository settings, navigate to **Webhooks > Add webhook**.
+2. Set the **Payload URL** to: `https://<your-backend-domain>/api/git-webhook`.
+3. Select **Content type** as `application/json`.
+4. Choose **Just the push event** and click **Add webhook**.
