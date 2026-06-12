@@ -1,21 +1,27 @@
 {
   "name": "backend",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node server.js",
-    "index": "node indexer.js"
+    "dev": "nodemon server.js",
+    "index": "node indexer.js",
+    "index:full": "node indexer.js --force",
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "",
+  "description": "Agentic Jira Ticket Analyzer — Production Backend",
   "dependencies": {
+    "@lancedb/lancedb": "^0.17.0",
+    "apache-arrow": "^18.0.0",
     "axios": "^1.17.0",
+    "better-sqlite3": "^11.10.0",
     "cors": "^2.8.6",
     "express": "^5.2.1",
     "fs": "^0.0.1-security",
+    "js-yaml": "^4.1.0",
     "nodemon": "^3.1.14",
     "path": "^0.12.7"
   }

@@ -23,7 +23,7 @@ dist/
 build/
 .next/
 
-# Environmental variables
+# Environmental variables — NEVER commit keys
 .env
 .env.local
 .env.development.local
@@ -34,8 +34,26 @@ build/
 .DS_Store
 Thumbs.db
 
-# Local clone of target repo (Option B reads this from GitHub API instead)
-repo/
+# ── RAG Pipeline Generated Data (local only, never commit) ───
+# LanceDB vector index — large binary files, rebuilt by: npm run index
+backend/data/lancedb/
+backend/data/hashes/
+backend/data/*.db
+backend/data/*.db-shm
+backend/data/*.db-wal
 
-# Vector database generated cache
+# Legacy vector store
 backend/vector_store.json
+
+# ── Local repo clones (client code — never commit) ───────────
+repo/
+testingrepo/
+
+# ── Bundler output ────────────────────────────────────────────
+dist/
+*.exe
+*.pkg
+
+# ── Tunnel binaries ───────────────────────────────────────────
+cloudflared.exe
+

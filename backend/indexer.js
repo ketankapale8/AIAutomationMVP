@@ -1,161 +1,290 @@
 // backend/indexer.js
+// Production-grade incremental repository indexer.
+//
+// What's new vs MVP:
+//   - Config-driven: reads all repos from config.yaml (no code changes per client)
+//   - Delta indexing: SHA-256 hash cache — only re-embeds changed/new files
+//   - AST-aware chunking: function/class-level chunks with rich metadata
+//   - LanceDB storage: persistent, ANN-searchable, per-repo collections
+//   - SQLite logging: every run is recorded with stats
+//   - Multi-repo support: indexes all repos in config in a single run
+
 const fs = require('fs');
 const path = require('path');
-const axios = require('axios');
-const chunker = require('./chunker');
-const embeddings = require('./embeddings');
-const vectorStore = require('./vectorStore');
 
-// Manually load env variables if process.env is not populated (running standalone)
-if (!process.env.GEMINI_API_KEY && !process.env.OPENAI_API_KEY && fs.existsSync(path.join(__dirname, '.env'))) {
+// Manually load .env before importing any module that reads env vars
+if (fs.existsSync(path.join(__dirname, '.env'))) {
   const envContent = fs.readFileSync(path.join(__dirname, '.env'), 'utf8');
   envContent.split('\n').forEach(line => {
-    const match = line.match(/^\s*([\w.-]+)\s*=\s*(.*)?\s*$/);
+    const match = line.match(/^\s*([\w.-]+)\s*=\s*(.*)?/);
     if (match) {
       const key = match[1];
-      let value = match[2] || '';
-      if (value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1);
-      if (value.startsWith("'") && value.endsWith("'")) value = value.slice(1, -1);
-      process.env[key] = value.trim();
+      let value = (match[2] || '').trim();
+      if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+        value = value.slice(1, -1);
+      }
+      if (!process.env[key]) process.env[key] = value;
     }
   });
 }
 
-const githubOwner = process.env.GITHUB_OWNER;
-const githubRepo = process.env.GITHUB_REPO;
-const githubToken = process.env.GITHUB_TOKEN;
-const githubBranch = process.env.GITHUB_BRANCH || "main";
+const embeddings = require('./embeddings');
+const lanceStore = require('./lanceStore');
+const astChunker = require('./astChunker');
+const hashCache = require('./hashCache');
+const { getAllRepos, getIndexerConfig } = require('./configLoader');
+const db = require('./db');
 
-// Utility to recursively scan local directories for indexable files
-function scanLocalDirectory(dir, fileList = []) {
-  if (!fs.existsSync(dir)) return fileList;
-  const files = fs.readdirSync(dir);
-  files.forEach(file => {
-    const filePath = path.join(dir, file);
-    const stat = fs.statSync(filePath);
-    if (stat.isDirectory()) {
-      if (file !== 'node_modules' && file !== '.git' && file !== '.next') {
-        scanLocalDirectory(filePath, fileList);
-      }
-    } else {
-      const ext = path.extname(file);
-      if (['.tsx', '.ts', '.jsx', '.js', '.css', '.json'].includes(ext)) {
-        fileList.push(filePath);
-      }
-    }
-  });
-  return fileList;
-}
+/**
+ * Recursively scans a directory and returns all indexable file paths.
+ * @param {string} dir           Absolute path to scan
+ * @param {Array<string>} extensions  File extensions to include (e.g. ['.ts', '.js'])
+ * @param {Array<string>} excludeDirs Directory names to skip
+ * @returns {Array<string>}      Absolute file paths
+ */
+function scanDirectory(dir, extensions, excludeDirs = []) {
+  const results = [];
 
-// Function to index a single file (splits it into chunks, embeds them, and adds them to store)
-async function indexFile(filePath, content) {
-  // Clear any existing chunks for this file to ensure clean overwrite
-  vectorStore.removeDocumentsForFile(filePath);
-
-  const chunks = chunker.splitCodeIntoChunks(filePath, content);
-  if (chunks.length === 0) return;
-
-  console.log(`⚡ Indexing file: ${filePath} (${chunks.length} chunks)`);
-  const docsToInsert = [];
-  
-  for (const chunk of chunks) {
-    try {
-      // Generate embedding
-      const vector = await embeddings.embedText(chunk.content);
-      docsToInsert.push({
-        filePath: chunk.filePath,
-        content: chunk.content,
-        startLine: chunk.startLine,
-        endLine: chunk.endLine,
-        embedding: vector
-      });
-      // Small sleep to avoid LLM API rate limits when indexing many files
-      await new Promise(resolve => setTimeout(resolve, 150));
-    } catch (err) {
-      console.error(`❌ Failed to embed chunk for ${filePath}:${chunk.startLine}:`, err.message);
-    }
+  if (!fs.existsSync(dir)) {
+    console.warn(`⚠️ Directory does not exist, skipping: ${dir}`);
+    return results;
   }
 
-  if (docsToInsert.length > 0) {
-    vectorStore.addDocuments(docsToInsert);
-  }
-}
+  const defaultExclude = new Set(['node_modules', '.git', '.next', 'dist', 'build', '.pnpm-store', 'coverage', '__pycache__', '.venv']);
+  const exclusions = new Set([...defaultExclude, ...excludeDirs]);
+  const validExts = new Set(extensions);
 
-// Main run function
-async function runIndexer() {
-  console.log("🚀 Starting Repository Offline Indexer...");
-  
-  if (githubToken && githubOwner && githubRepo) {
-    console.log(`🌐 GitHub Mode: Fetching files from API: ${githubOwner}/${githubRepo} (${githubBranch})...`);
+  function walk(currentDir) {
+    let entries;
     try {
-      const treeUrl = `https://api.github.com/repos/${githubOwner}/${githubRepo}/git/trees/${githubBranch}?recursive=1`;
-      const headers = {
-        'Authorization': `token ${githubToken}`,
-        'Accept': 'application/vnd.github.v3+json',
-        'User-Agent': 'ICIMS-AI-Agent-Indexer'
-      };
-
-      const treeResponse = await axios.get(treeUrl, { headers });
-      const files = treeResponse.data.tree || [];
-
-      // Filter indexable files
-      const indexableFiles = files.filter(f => 
-        f.type === 'blob' && 
-        f.path.startsWith('src/') && 
-        ['.tsx', '.ts', '.jsx', '.js', '.css', '.json'].includes(path.extname(f.path))
-      );
-
-      console.log(`Found ${indexableFiles.length} files to index on GitHub.`);
-      
-      for (const file of indexableFiles) {
-        try {
-          const fileUrl = `https://raw.githubusercontent.com/${githubOwner}/${githubRepo}/${githubBranch}/${file.path}`;
-          const contentRes = await axios.get(fileUrl, { headers });
-          const content = typeof contentRes.data === 'object' ? JSON.stringify(contentRes.data, null, 2) : contentRes.data;
-          await indexFile(file.path, content);
-        } catch (fileErr) {
-          console.error(`❌ Failed to fetch and index GitHub file ${file.path}:`, fileErr.message);
-        }
-      }
-    } catch (err) {
-      console.error("❌ GitHub indexing failed:", err.message);
-    }
-  } else {
-    // Local Scan Mode
-    const localRepoPath = process.env.REPO_PATH || path.join(__dirname, '..', 'repo', 'nextjs-dnd', 'src');
-    console.log(`💻 Local Mode: Scanning directory: ${localRepoPath}...`);
-    
-    if (!fs.existsSync(localRepoPath)) {
-      console.error(`❌ Local directory does not exist: ${localRepoPath}`);
+      entries = fs.readdirSync(currentDir);
+    } catch {
       return;
     }
 
-    const files = scanLocalDirectory(localRepoPath);
-    console.log(`Found ${files.length} indexable files locally.`);
-
-    for (const filePath of files) {
+    for (const entry of entries) {
+      const fullPath = path.join(currentDir, entry);
+      let stat;
       try {
-        const content = fs.readFileSync(filePath, 'utf8');
-        const relativePath = path.relative(path.join(__dirname, '..', 'repo', 'nextjs-dnd'), filePath);
-        await indexFile(relativePath, content);
-      } catch (err) {
-        console.error(`❌ Failed to read and index local file ${filePath}:`, err.message);
+        stat = fs.statSync(fullPath);
+      } catch {
+        continue;
+      }
+
+      if (stat.isDirectory()) {
+        if (!exclusions.has(entry)) walk(fullPath);
+      } else if (stat.isFile()) {
+        if (validExts.has(path.extname(entry).toLowerCase())) {
+          results.push(fullPath);
+        }
       }
     }
   }
 
-  console.log("✅ Repository Indexing Completed successfully.");
+  walk(dir);
+  return results;
 }
 
-// Check if run directly
+/**
+ * Indexes a single file: chunks it, embeds chunks, stores in LanceDB.
+ * @param {string} absoluteFilePath  Full path to file on disk
+ * @param {string} content           File content
+ * @param {string} repoId            Repo identifier
+ * @param {string} repoRootPath      Repo root (used for computing relative paths)
+ * @param {string} fileHash          SHA-256 of content
+ * @param {number} delayMs           Delay between embedding API calls
+ * @returns {number}  Number of chunks indexed
+ */
+async function indexFile(absoluteFilePath, content, repoId, repoRootPath, fileHash, delayMs = 120) {
+  // Use relative path for storage (portable across environments)
+  const relativePath = path.relative(repoRootPath, absoluteFilePath).replace(/\\/g, '/');
+
+  // 1. Remove old chunks for this file
+  await lanceStore.removeDocumentsForFile(relativePath, repoId);
+
+  // 2. Chunk the file using AST-aware chunker
+  const chunks = astChunker.splitCodeIntoChunks(absoluteFilePath, content);
+  if (chunks.length === 0) return 0;
+
+  console.log(`  ⚡ ${relativePath} → ${chunks.length} chunk(s)`);
+
+  // 3. Embed each chunk and collect for batch insert
+  const cfg = getIndexerConfig();
+  const docs = [];
+
+  for (const chunk of chunks) {
+    try {
+      const vector = await embeddings.embedText(chunk.content);
+      docs.push({
+        filePath: relativePath,
+        content: chunk.content,
+        startLine: chunk.startLine,
+        endLine: chunk.endLine,
+        embedding: vector,
+        repoId,
+        symbolName: chunk.symbolName || '',
+        symbolType: chunk.symbolType || '',
+        language: chunk.language || '',
+        fileHash
+      });
+      if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
+    } catch (err) {
+      console.error(`    ❌ Embed failed for ${relativePath}:${chunk.startLine} — ${err.message}`);
+    }
+  }
+
+  // 4. Batch insert into LanceDB
+  if (docs.length > 0) {
+    await lanceStore.addDocuments(docs);
+  }
+
+  return docs.length;
+}
+
+/**
+ * Indexes a single repo (delta mode by default).
+ * @param {object} repoConfig  Repo config object from config.yaml
+ * @param {object} options
+ * @param {boolean} options.force  If true, ignores hash cache (full re-index)
+ */
+async function indexRepo(repoConfig, { force = false } = {}) {
+  const { id: repoId, name: repoName, localPath, extensions = [], excludeDirs = [] } = repoConfig;
+  const cfg = getIndexerConfig();
+
+  console.log(`\n📂 Indexing repo: ${repoName} (${repoId})`);
+  console.log(`   Path: ${localPath}`);
+
+  // Mark as indexing in DB
+  db.upsertRepoStatus({ repoId, repoName, localPath, status: 'indexing' });
+  const logId = db.startIndexLog(repoId, force ? 'full' : 'delta');
+  const startTime = Date.now();
+
+  let filesAdded = 0, filesSkipped = 0, filesRemoved = 0;
+
+  try {
+    // 1. Scan directory for indexable files
+    const allFiles = scanDirectory(localPath, extensions, excludeDirs);
+    console.log(`   Found ${allFiles.length} indexable files`);
+
+    // 2. Load hash cache (for delta detection)
+    const cache = force ? {} : hashCache.loadCache(repoId);
+
+    // 3. Find deleted files (in cache but not on disk anymore)
+    const deletedFiles = hashCache.findDeletedFiles(cache);
+    for (const deletedPath of deletedFiles) {
+      const relPath = path.relative(localPath, deletedPath).replace(/\\/g, '/');
+      await lanceStore.removeDocumentsForFile(relPath, repoId);
+      hashCache.removeFromCache(deletedPath, cache);
+      filesRemoved++;
+      console.log(`   🗑️ Removed deleted file: ${relPath}`);
+    }
+
+    // 4. Index new and changed files
+    for (const filePath of allFiles) {
+      let content;
+      try {
+        content = fs.readFileSync(filePath, 'utf8');
+      } catch (err) {
+        console.error(`   ❌ Failed to read ${filePath}: ${err.message}`);
+        continue;
+      }
+
+      if (!force && !hashCache.isChanged(filePath, content, cache)) {
+        filesSkipped++;
+        continue; // Unchanged — skip
+      }
+
+      const fileHash = hashCache.hashContent(content);
+      const chunksIndexed = await indexFile(filePath, content, repoId, localPath, fileHash, cfg.embeddingDelayMs);
+      hashCache.updateCache(filePath, content, cache);
+      filesAdded++;
+    }
+
+    // 5. Save updated hash cache
+    hashCache.saveCache(repoId, cache);
+
+    // 6. Get total chunk count from LanceDB
+    const totalChunks = await lanceStore.getChunkCount(repoId);
+    const durationMs = Date.now() - startTime;
+
+    // 7. Update DB status
+    db.upsertRepoStatus({
+      repoId, repoName, localPath,
+      totalFiles: allFiles.length,
+      totalChunks,
+      status: 'ready'
+    });
+    db.finishIndexLog(logId, { filesAdded, filesSkipped, filesRemoved, durationMs });
+
+    console.log(`\n✅ Repo "${repoId}" indexed in ${(durationMs / 1000).toFixed(1)}s`);
+    console.log(`   Added: ${filesAdded} | Skipped: ${filesSkipped} | Removed: ${filesRemoved} | Total chunks: ${totalChunks}`);
+
+  } catch (err) {
+    const durationMs = Date.now() - startTime;
+    db.upsertRepoStatus({ repoId, repoName, localPath, status: 'error' });
+    db.finishIndexLog(logId, { filesAdded, filesSkipped, filesRemoved, durationMs, error: err.message });
+    console.error(`❌ Indexing failed for repo "${repoId}": ${err.message}`);
+    throw err;
+  }
+}
+
+/**
+ * Main run function — indexes all repos defined in config.yaml.
+ * Pass --force to ignore hash cache and re-index everything.
+ */
+async function runIndexer() {
+  const force = process.argv.includes('--force');
+  console.log(`\n🚀 Starting ${force ? 'FULL' : 'Incremental'} Indexer...`);
+  console.log(`   Mode: ${force ? 'Full Re-index (ignoring hash cache)' : 'Delta (only changed files)'}`);
+
+  const repos = getAllRepos();
+  if (repos.length === 0) {
+    console.error('❌ No repos configured in config.yaml');
+    return;
+  }
+
+  console.log(`   Repos to index: ${repos.map(r => r.id).join(', ')}`);
+
+  for (const repo of repos) {
+    try {
+      await indexRepo(repo, { force });
+    } catch (err) {
+      console.error(`❌ Skipping repo "${repo.id}" due to error: ${err.message}`);
+    }
+  }
+
+  console.log('\n✅ All repos indexed successfully.\n');
+}
+
+// ── Single-file indexer (called by server on git webhook) ────
+
+/**
+ * Re-indexes a single file in a specific repo (called on git push webhook).
+ * @param {string} filePath  Absolute file path
+ * @param {string} content   File content
+ * @param {string} repoId    Repo identifier
+ * @param {string} repoRoot  Repo root path
+ */
+async function indexSingleFile(filePath, content, repoId, repoRoot) {
+  const cfg = getIndexerConfig();
+  const fileHash = hashCache.hashContent(content);
+  const cache = hashCache.loadCache(repoId);
+  await indexFile(filePath, content, repoId, repoRoot, fileHash, cfg.embeddingDelayMs);
+  hashCache.updateCache(filePath, content, cache);
+  hashCache.saveCache(repoId, cache);
+}
+
+// Run if executed directly
 if (require.main === module) {
   runIndexer().catch(err => {
-    console.error("❌ Indexer crashed:", err);
+    console.error('❌ Indexer crashed:', err);
     process.exit(1);
   });
 }
 
 module.exports = {
   runIndexer,
-  indexFile
+  indexRepo,
+  indexSingleFile,
+  scanDirectory
 };

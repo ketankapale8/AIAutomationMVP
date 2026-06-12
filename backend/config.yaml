@@ -1,0 +1,143 @@
+# ============================================================
+#  Agentic Jira Ticket Analyzer — Client Configuration
+#  This is the ONLY file clients need to edit.
+#  All repo → Jira board routing is defined here.
+# ============================================================
+
+server:
+  port: 5001
+  # Set to 'production' to enforce strict HMAC verification
+  env: development
+
+# ── Repositories ────────────────────────────────────────────
+# Each entry defines one codebase to index and query.
+repos:
+  - id: prozilla-os              # Unique repo identifier (used as vector collection name)
+    name: "ProzillaOS Demo"
+    localPath: "C:\\AIAutomationMVP\\testingrepo\\ProzillaOS"
+    # Extensions to index
+    extensions: [".tsx", ".ts", ".jsx", ".js", ".css", ".json", ".py", ".md"]
+    # Directories to skip during scan
+    excludeDirs: ["node_modules", ".git", ".next", "dist", "build", ".pnpm-store"]
+    # Jira project keys that map to this repo (e.g. ticket SCRUM-101 → prozilla-os repo)
+    jiraProjects: ["SCRUM", "PROZILLA", "POS"]
+
+  # ── Add more repos below as needed ──────────────────────────
+  # - id: backend-api
+  #   name: "Backend API Service"
+  #   localPath: "C:\\Projects\\backend-api"
+  #   extensions: [".js", ".ts", ".json", ".yaml"]
+  #   excludeDirs: ["node_modules", ".git", "dist"]
+  #   jiraProjects: ["API", "BACK"]
+  #
+  # - id: mobile-app
+  #   name: "Mobile App"
+  #   localPath: "C:\\Projects\\mobile"
+  #   extensions: [".swift", ".kt", ".tsx"]
+  #   excludeDirs: ["node_modules", ".git", "Pods"]
+  #   jiraProjects: ["MOB", "IOS"]
+
+# ── LLM Router ───────────────────────────────────────────────
+# Controls which model tier is used per ticket type.
+# Models are tried left-to-right; first one with a configured API key wins.
+llm:
+  fast:
+    # Used for: Bug, Task, Sub-task
+    # ─ LOCAL  (default): qwen2.5-coder:3b via Ollama → ~60-90s, zero cost, offline
+    # ─ DEMO   (add GROQ_API_KEY): groq llama-3.3-70b → ~7s
+    # ─ PAID   (add ANTHROPIC_API_KEY): claude-haiku → ~3s, best quality
+    providers:
+      - name: ollama
+        model: qwen2.5-coder:3b
+        baseUrl: "http://localhost:11434"
+      - name: groq
+        model: llama-3.3-70b-versatile
+        envKey: GROQ_API_KEY
+      - name: anthropic
+        model: claude-3-5-haiku-20241022
+        envKey: ANTHROPIC_API_KEY
+      - name: gemini
+        model: gemini-1.5-flash
+        envKey: GEMINI_API_KEY
+      - name: deepseek
+        model: deepseek-chat
+        envKey: DEEPSEEK_API_KEY
+
+  balanced:
+    # Used for: Story, Improvement, Feature
+    # ─ LOCAL  (default): deepseek-coder:6.7b via Ollama → ~90-150s, offline
+    # ─ DEMO   (add GROQ_API_KEY): groq llama-3.3-70b → ~9s
+    # ─ PAID   (add ANTHROPIC_API_KEY): claude-sonnet → best reasoning
+    providers:
+      - name: ollama
+        model: deepseek-coder:6.7b-instruct
+        baseUrl: "http://localhost:11434"
+      - name: groq
+        model: llama-3.3-70b-versatile
+        envKey: GROQ_API_KEY
+      - name: anthropic
+        model: claude-sonnet-4-5
+        envKey: ANTHROPIC_API_KEY
+      - name: gemini
+        model: gemini-1.5-pro
+        envKey: GEMINI_API_KEY
+      - name: openai
+        model: gpt-4o-mini
+        envKey: OPENAI_API_KEY
+
+  deep:
+    # Used for: Epic, New Feature, Architecture
+    # ─ LOCAL  (default): deepseek-coder:6.7b via Ollama → ~120-180s, offline
+    # ─ DEMO   (add GROQ_API_KEY): groq llama-3.3-70b → ~12s
+    # ─ PAID   (add ANTHROPIC_API_KEY): claude-sonnet → highest quality architecture analysis
+    providers:
+      - name: ollama
+        model: deepseek-coder:6.7b-instruct
+        baseUrl: "http://localhost:11434"
+      - name: groq
+        model: llama-3.3-70b-versatile
+        envKey: GROQ_API_KEY
+      - name: anthropic
+        model: claude-sonnet-4-5
+        envKey: ANTHROPIC_API_KEY
+      - name: openai
+        model: gpt-4o
+        envKey: OPENAI_API_KEY
+      - name: deepseek
+        model: deepseek-chat
+        envKey: DEEPSEEK_API_KEY
+      - name: gemini
+        model: gemini-1.5-pro
+        envKey: GEMINI_API_KEY
+
+# ── Token Budget ─────────────────────────────────────────────
+tokenBudget:
+  formatA:           # Bug / Task tickets
+    ticketTokens: 200
+    codeTokens: 1800
+    instructionTokens: 150
+    maxChunks: 15
+  formatB:           # Feature / Epic tickets
+    ticketTokens: 350
+    codeTokens: 2400
+    instructionTokens: 200
+    maxChunks: 25
+
+# ── Indexer ──────────────────────────────────────────────────
+indexer:
+  # How many chars per chunk (approximate token limit before embedding)
+  chunkSizeChars: 1200
+  # Chars of overlap between adjacent chunks
+  chunkOverlapChars: 200
+  # Delay in ms between embedding API calls to stay within rate limits
+  embeddingDelayMs: 120
+  # Vector DB storage directory (relative to backend/)
+  lanceDbPath: "./data/lancedb"
+  # Hash cache directory (relative to backend/)
+  hashCachePath: "./data/hashes"
+
+# ── Jira Webhook ─────────────────────────────────────────────
+jira:
+  # HMAC secret for webhook verification (set in .env as JIRA_WEBHOOK_SECRET)
+  # Leave empty to skip verification in dev mode
+  webhookSecretEnvKey: JIRA_WEBHOOK_SECRET
