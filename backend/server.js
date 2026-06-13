@@ -249,18 +249,28 @@ const processAnalysis = async (ticketKey, title, description, imagePaths, jiraUr
 
   console.log(`\n🔍 [${ticketKey}] Project key: "${projectKey}" → Repo: "${repoId}" | Issue type: "${issueType}"`);
 
-  // 2. Embed the ticket query
+  // 2. Embed the ticket query → null means all embedding providers are down
   let chunks = [];
+  let degradedMode = false;
   try {
     const queryText = `${title}\n${description}`;
     console.log(`🤖 Generating query embedding...`);
     const queryVector = await embeddings.embedText(queryText);
-    const tokenBudget = configLoader.getTokenBudget('formatA'); // will be overridden by promptBuilder
-    console.log(`🔍 Querying LanceDB (repo: ${repoId})...`);
-    chunks = await lanceStore.similaritySearch(queryVector, 25, repoId);
-    console.log(`   Found ${chunks.length} relevant chunk(s)`);
+
+    if (queryVector === null) {
+      // All embedding providers unavailable — run in degraded mode (LLM-only, no code context)
+      degradedMode = true;
+      console.warn(`⚠️  [DEGRADED MODE] No embedding provider available.`);
+      console.warn(`   Analysis will proceed without code context (no RAG).`);
+      console.warn(`   Fix: Start Ollama (ollama serve) OR add GEMINI_API_KEY to .env`);
+    } else {
+      console.log(`🔍 Querying LanceDB (repo: ${repoId})...`);
+      chunks = await lanceStore.similaritySearch(queryVector, 25, repoId);
+      console.log(`   Found ${chunks.length} relevant chunk(s)`);
+    }
   } catch (err) {
-    console.error('❌ Vector search failed:', err.message);
+    console.error('❌ Vector search failed (continuing without code context):', err.message);
+    degradedMode = true;
   }
 
   // 3. Build the prompt (token-budgeted, format auto-detected)
@@ -304,7 +314,9 @@ const processAnalysis = async (ticketKey, title, description, imagePaths, jiraUr
     format,
     issueType,
     repoId,
-    llmProvider
+    llmProvider,
+    degradedMode,          // true = ran without code context (embedding unavailable)
+    chunksUsed: chunks.length
   };
 
   // 6. Persist to SQLite

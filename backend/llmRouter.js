@@ -2,19 +2,33 @@
 // LLM Router — selects and calls the appropriate provider based on tier + config.
 // Reads the provider chain from config.yaml, tries each in order until one succeeds.
 //
-// Tiers:
-//   fast     → Bug, Task, Sub-task (low-latency, low-cost)
-//   balanced → Story, Improvement (mid-tier quality)
-//   deep     → Epic, Architecture, New Feature (highest quality)
+// Strategy:
+//   LOCAL mode  → ollama first (free, offline). Cloud = fallback only if Ollama fails.
+//   DEMO mode   → add GROQ_API_KEY to .env → Groq activates automatically (~7s)
+//   PAID mode   → add ANTHROPIC_API_KEY → Claude used for best quality
 //
-// Provider priority (config.yaml controlled):
-//   LOCAL mode  → ollama first, cloud as fallback
-//   DEMO mode   → groq first (add GROQ_API_KEY to .env)
-//   PAID mode   → anthropic first (add ANTHROPIC_API_KEY to .env)
+// Circuit Breaker: after a provider fails (non-config error), it is skipped
+// for CIRCUIT_RESET_MS (5 min) to avoid hammering a downed service on every ticket.
 
 const axios = require('axios');
 const { getLLMProviders } = require('./configLoader');
 const { estimateTokens } = require('./promptBuilder');
+
+// ── Circuit Breaker ───────────────────────────────────────────
+const CIRCUIT_RESET_MS = 5 * 60 * 1000;
+const _circuit = {};
+
+function isCircuitOpen(name) {
+  const s = _circuit[name];
+  if (!s) return false;
+  if (Date.now() - s.failedAt > CIRCUIT_RESET_MS) { delete _circuit[name]; return false; }
+  return true;
+}
+
+function openCircuit(name) {
+  _circuit[name] = { failedAt: Date.now() };
+  console.warn(`  ⚡ LLM circuit open for "${name}" — skipping for ${CIRCUIT_RESET_MS/60000} min`);
+}
 
 /**
  * Calls a specific LLM provider.
@@ -137,31 +151,43 @@ async function routeToLLM(prompt, tier = 'fast') {
   let lastError = null;
 
   for (const provider of providers) {
+    const isConfigError = (msg) => msg.includes('not set') || msg.includes('API key');
+
+    // Skip providers whose API key isn't set
+    if (provider.envKey && !process.env[provider.envKey]) {
+      console.log(`  ⏭️  ${provider.name}: skipped (${provider.envKey} not set)`);
+      continue;
+    }
+
+    // Skip providers that recently failed (circuit breaker)
+    if (isCircuitOpen(provider.name)) {
+      console.log(`  ⚡ ${provider.name}: circuit open — skipping`);
+      continue;
+    }
+
     try {
       console.log(`  ↳ Trying ${provider.name} (${provider.model})...`);
       const result = await callProvider(provider, prompt);
       const outputTokens = estimateTokens(result.text);
       console.log(`  ✅ ${provider.name} responded. ~${outputTokens} output tokens.`);
-      return {
-        text: result.text,
-        provider: result.provider,
-        model: result.model,
-        inputTokens,
-        outputTokens
-      };
+      return { text: result.text, provider: result.provider, model: result.model, inputTokens, outputTokens };
     } catch (err) {
       lastError = err;
-      const isConfigError = err.message.includes('not set') || err.message.includes('API key');
-      if (isConfigError) {
+      if (isConfigError(err.message)) {
         console.log(`  ⏭️  ${provider.name}: skipped (${err.message})`);
       } else {
         console.error(`  ❌ ${provider.name} failed: ${err.message}`);
+        openCircuit(provider.name); // Don't retry for 5 min
       }
     }
   }
 
-  // All providers exhausted
-  throw new Error(`All LLM providers exhausted for tier "${tier}". Last error: ${lastError?.message || 'unknown'}`);
+  // All providers exhausted — give actionable guidance
+  throw new Error(
+    `All LLM providers exhausted for tier "${tier}". ` +
+    `Last error: ${lastError?.message || 'unknown'}. ` +
+    `Fix: Start Ollama (ollama serve) OR add GROQ_API_KEY / ANTHROPIC_API_KEY to .env`
+  );
 }
 
 module.exports = {
