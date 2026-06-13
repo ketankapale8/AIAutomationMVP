@@ -24,10 +24,11 @@ sequenceDiagram
     LLM-->>Executable: Return vectors
     Executable->>VectorDB: Save chunks + embeddings + metadata to data/lancedb
     
-    %% Phase 2: Per-Ticket Analysis
-    Note over User, LLM: Phase 2: Jira Webhook Analysis (Online or Offline)
+    %% Phase 2: Per-Ticket Analysis via Polling
+    Note over User, LLM: Phase 2: Background Polling (Zero-Config Network)
     User->>Jira: Create / Edit Scrum Board Ticket
-    Jira->>Executable: Post webhook event to port 5001
+    Executable->>Jira: Poll Jira API every 30s (v3/search/jql)
+    Jira-->>Executable: Return new tickets
     Executable->>LLM: 1. Generate query embedding for ticket text
     LLM-->>Executable: Return query vector
     Executable->>VectorDB: 2. Query top-k relevant code chunks
@@ -45,9 +46,10 @@ sequenceDiagram
 * **Semantic Search Engine**:
   * **Embeddings**: Local Ollama (`nomic-embed-text`).
   * **Local Vector Store**: **LanceDB** built-in, persisting vectors inside the local `data/lancedb/` folder (Zero external database dependencies).
-* **LLM Router Engine**:
-  * **Offline Default**: Local `qwen2.5-coder:3b` via Ollama.
-  * **Cloud Fallbacks**: Groq (`llama-3.3-70b`), Anthropic (`claude-3-5-sonnet`), Gemini.
+* **LLM Router Engine with Auto-Fallback**:
+  * **Cloud First**: Uses powerful models like Groq (`llama-3.3-70b`) with a defined `dailyCloudTokenLimit` (e.g. 100k tokens/day).
+  * **Local Fallback**: Automatically falls back to Local `qwen2.5-coder:3b` via Ollama once the daily cloud limit is hit, ensuring zero-cost operation at scale.
+  * **Anti-Hallucination**: Injects the repository file tree structure to prevent local models from hallucinating non-existent files.
 
 ---
 

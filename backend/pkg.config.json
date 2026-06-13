@@ -3,6 +3,8 @@
   "targets": ["node18-win-x64"],
   "outputPath": "../dist",
   "assets": [
+    "node_modules/**/*.node",
+    "node_modules/**/*.wasm"
   ],
   "scripts": [
     "server.js",

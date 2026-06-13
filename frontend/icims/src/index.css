@@ -171,6 +171,7 @@ body {
   background: var(--hover-bg);
   color: var(--text-1);
   border-color: var(--border);
+  transform: translateX(4px);
 }
 
 .nav-item.active {
@@ -261,8 +262,8 @@ table { width: 100%; border-collapse: collapse; }
 thead tr { border-bottom: 1px solid var(--border); }
 th { padding: 10px 16px; font-size: 11px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.8px; text-align: left; white-space: nowrap; }
 td { padding: 13px 16px; font-size: 13px; color: var(--text-2); vertical-align: middle; border-bottom: 1px solid rgba(255,255,255,0.03); }
-tbody tr { transition: background 0.15s ease; cursor: pointer; }
-tbody tr:hover { background: var(--hover-bg); }
+tbody tr { transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); cursor: pointer; position: relative; }
+tbody tr:hover { background: var(--inner-bg); box-shadow: inset 0 0 0 1px var(--violet-dim); }
 tbody tr:hover td { color: var(--text-1); }
 
 /* ── Badges ────────────────────────────────────────────────── */
@@ -384,6 +385,7 @@ tbody tr:hover td { color: var(--text-1); }
   border-radius: var(--radius-sm);
   overflow: hidden;
   margin: 16px 0;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 .code-header {

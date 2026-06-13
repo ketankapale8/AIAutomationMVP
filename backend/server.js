@@ -17,6 +17,7 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { startPolling, forcePoll } = require('./jiraPoller');
 
 // ── Load .env ────────────────────────────────────────────────
 // PKG bundles code into a virtual snapshot; __dirname resolves inside the exe.
@@ -152,7 +153,9 @@ const fetchJiraIssue = async (issueKey) => {
   const email = process.env.JIRA_EMAIL;
   const token = process.env.JIRA_API_TOKEN;
   const rawDomain = process.env.JIRA_DOMAIN || 'your-domain.atlassian.net';
-  const domain = rawDomain.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+  let domain = 'your-domain.atlassian.net';
+  try { domain = new URL(rawDomain.startsWith('http') ? rawDomain : 'https://' + rawDomain).host; }
+  catch (e) { domain = rawDomain.replace(/^https?:\/\//i, '').split('/')[0]; }
 
   if (!email || !token) {
     console.warn('⚠️ Jira credentials not configured. Cannot fetch issue.');
@@ -195,12 +198,13 @@ const searchJiraIssues = async (queryText) => {
   const email = process.env.JIRA_EMAIL;
   const token = process.env.JIRA_API_TOKEN;
   const rawDomain = process.env.JIRA_DOMAIN || 'your-domain.atlassian.net';
-  const domain = rawDomain.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+  let domain = 'your-domain.atlassian.net';
+  try { domain = new URL(rawDomain.startsWith('http') ? rawDomain : 'https://' + rawDomain).host; }
+  catch (e) { domain = rawDomain.replace(/^https?:\/\//i, '').split('/')[0]; }
 
   if (!email || !token) return [];
-
   try {
-    const url = `https://${domain}/rest/api/2/search`;
+    const url = `https://${domain}/rest/api/3/search/jql`;
     const auth = Buffer.from(`${email}:${token}`).toString('base64');
     const jql = `text ~ "${queryText.replace(/"/g, '\\"')}"`;
     const response = await axios.post(url, { jql, maxResults: 5, fields: ['summary', 'description', 'status'] }, {
@@ -289,6 +293,7 @@ const processAnalysis = async (ticketKey, title, description, imagePaths, jiraUr
     description,
     issueType,
     chunks,
+    repoPath: repoConfig ? repoConfig.localPath : null,
     tokenBudget: configLoader.getTokenBudget(
       ['story', 'feature', 'new feature', 'epic', 'improvement', 'enhancement', 'initiative', 'architecture'].includes((issueType || '').toLowerCase())
         ? 'formatB' : 'formatA'
@@ -637,6 +642,20 @@ app.get('/api/latest-analysis', (req, res) => {
   res.json(latestTicketAnalysis);
 });
 
+// ── Manual Polling Trigger ────────────────────────────────────
+app.post('/api/poll-now', async (req, res) => {
+  try {
+    const started = await forcePoll();
+    if (started) {
+      res.json({ status: 'polling_started' });
+    } else {
+      res.status(400).json({ error: 'Poller is not configured or running.' });
+    }
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to trigger poll: ' + err.message });
+  }
+});
+
 // ── Ticket History (SQLite) ───────────────────────────────────
 app.get('/api/tickets', (req, res) => {
   try {
@@ -714,6 +733,14 @@ app.listen(PORT, async () => {
   console.log(`\n🚀 Agentic Jira Ticket Analyzer v2.0 — running on http://localhost:${PORT}`);
   console.log(`   Config: config.yaml | DB: data/analyzer.db | Vector: data/lancedb/`);
   console.log(`   Repos: ${configLoader.getAllRepos().map(r => r.id).join(', ')}`);
+  
+  // Start the Jira Poller if enabled
+  try {
+    startPolling(configLoader.getConfig(), processAnalysis);
+  } catch (err) {
+    console.error(`⚠️ Failed to start Jira Poller:`, err.message);
+  }
+
   // Run environment validator (non-blocking — server is already accepting requests)
   await validateEnvironment();
 });

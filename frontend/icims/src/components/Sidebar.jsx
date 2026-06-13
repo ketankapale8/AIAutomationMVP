@@ -62,6 +62,22 @@ export default function Sidebar({ serverStatus }) {
           <span className="nav-item-icon">🔄</span>
           Reload Config
         </button>
+
+        <button
+          className="nav-item"
+          onClick={() => {
+            fetch('http://localhost:5001/api/poll-now', { method: 'POST' })
+              .then(res => res.json())
+              .then(data => {
+                if (data.status === 'polling_started') alert('⚡ Jira Sync Triggered!');
+                else alert('⚠️ ' + data.error);
+              })
+              .catch(() => alert('❌ Could not reach backend'));
+          }}
+        >
+          <span className="nav-item-icon">⚡</span>
+          Sync Jira Now
+        </button>
       </nav>
 
       {/* Footer status */}

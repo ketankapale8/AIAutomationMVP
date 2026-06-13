@@ -11,7 +11,33 @@
 //
 // Token estimation: ~4 chars ≈ 1 token (GPT-style approximation)
 
+const fs = require('fs');
+const path = require('path');
 const CHARS_PER_TOKEN = 4;
+
+// ── File Tree Generator (Anti-Hallucination) ─────────────────
+
+function getFileTree(dirPath, depth = 0, maxDepth = 4) {
+  if (!dirPath || !fs.existsSync(dirPath) || depth > maxDepth) return '';
+  let tree = '';
+  try {
+    const items = fs.readdirSync(dirPath, { withFileTypes: true });
+    // Common ignores
+    const ignore = new Set(['node_modules', '.git', 'dist', 'build', '.next', 'coverage']);
+    
+    for (const item of items) {
+      if (ignore.has(item.name)) continue;
+      const indent = '  '.repeat(depth);
+      if (item.isDirectory()) {
+        tree += `${indent}📁 ${item.name}/\n`;
+        tree += getFileTree(path.join(dirPath, item.name), depth + 1, maxDepth);
+      } else {
+        tree += `${indent}📄 ${item.name}\n`;
+      }
+    }
+  } catch (err) { return ''; }
+  return tree;
+}
 
 // ── Ticket type classification ───────────────────────────────
 
@@ -136,7 +162,8 @@ function buildCodeContext(chunks, maxTokens) {
 
 // ── Format A Prompt (Bug / Task) ─────────────────────────────
 
-function buildFormatAPrompt({ title, description, issueType, contextText }) {
+function buildFormatAPrompt(params) {
+  const { title, description, issueType, contextText } = params;
   return `You are an expert AI Technical Analyst embedded in a software team's CI/CD pipeline.
 A Jira ${issueType || 'ticket'} has been received. Perform a concise technical analysis.
 
@@ -148,6 +175,11 @@ ${description}
 
 ## Relevant Codebase Context
 ${contextText || 'No relevant code context found. Run the indexer first.'}
+
+## Repository File Structure (DO NOT INVENT FILES)
+\`\`\`
+${params.fileTree || 'File tree unavailable.'}
+\`\`\`
 
 ---
 Respond ONLY using the exact headings below. Be concise and precise. Reference specific file names and line numbers.
@@ -173,12 +205,15 @@ Provide the exact code changes needed. Use code blocks with the language and fil
 \`\`\`
 Keep total code snippets under 200 lines.
 
-**CONSTRAINTS:** Total response must be under 400 words. No conversational filler.`;
+**CONSTRAINTS:**
+1. Total response must be under 400 words. No conversational filler.
+2. CRITICAL: DO NOT INVENT OR GUESS FILE PATHS. You must ONLY suggest modifying files that are explicitly listed in the "Relevant Codebase Context" above. If you need to create a new file, use a realistic path based on the context.`;
 }
 
 // ── Format B Prompt (Feature / Epic) ─────────────────────────
 
-function buildFormatBPrompt({ title, description, issueType, contextText }) {
+function buildFormatBPrompt(params) {
+  const { title, description, issueType, contextText } = params;
   return `You are a Principal Software Architect reviewing a Jira ${issueType || 'feature'} ticket.
 Your job is to produce a comprehensive technical design and implementation blueprint.
 
@@ -190,6 +225,11 @@ ${description}
 
 ## Existing Codebase Context (Relevant Sections)
 ${contextText || 'No relevant code context found. Run the indexer first.'}
+
+## Repository File Structure (DO NOT INVENT FILES)
+\`\`\`
+${params.fileTree || 'File tree unavailable.'}
+\`\`\`
 
 ---
 Respond ONLY using the exact headings below. Be thorough but concise.
@@ -230,7 +270,9 @@ Any new tables, columns, or schema changes needed.
 ## 9. Open Questions / Risks
 Any ambiguities, dependencies, or risks the team should resolve before starting.
 
-**CONSTRAINTS:** Response should be 600–900 words. Use code examples sparingly (only for API schemas or complex logic).`;
+**CONSTRAINTS:** 
+1. Response should be 600–900 words. Use code examples sparingly (only for API schemas or complex logic).
+2. CRITICAL: DO NOT INVENT OR GUESS EXISTING FILE PATHS. When listing "Files to Modify", you must ONLY list files that explicitly appear in the "Existing Codebase Context" above.`;
 }
 
 // ── Main export ───────────────────────────────────────────────
@@ -245,9 +287,11 @@ Any ambiguities, dependencies, or risks the team should resolve before starting.
  * @param {object} [params.tokenBudget]   Optional override from config
  * @returns {{ prompt: string, format: string, tier: string, estimatedTokens: number }}
  */
-function buildPrompt({ title, description, issueType, chunks, tokenBudget }) {
+function buildPrompt({ title, description, issueType, chunks, tokenBudget, repoPath }) {
   const format = detectFormat(issueType);
   const tier = detectLLMTier(issueType);
+
+  const fileTree = repoPath ? getFileTree(repoPath, 0, 3) : '';
 
   // Token budgets
   const budget = tokenBudget || {};
@@ -260,9 +304,9 @@ function buildPrompt({ title, description, issueType, chunks, tokenBudget }) {
 
   let prompt;
   if (format === 'A') {
-    prompt = buildFormatAPrompt({ title, description, issueType, contextText });
+    prompt = buildFormatAPrompt({ title, description, issueType, contextText, fileTree });
   } else {
-    prompt = buildFormatBPrompt({ title, description, issueType, contextText });
+    prompt = buildFormatBPrompt({ title, description, issueType, contextText, fileTree });
   }
 
   const totalEstimatedTokens = estimateTokens(prompt);

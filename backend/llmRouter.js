@@ -11,8 +11,9 @@
 // for CIRCUIT_RESET_MS (5 min) to avoid hammering a downed service on every ticket.
 
 const axios = require('axios');
-const { getLLMProviders } = require('./configLoader');
+const { getLLMProviders, getConfig } = require('./configLoader');
 const { estimateTokens } = require('./promptBuilder');
+const { getDailyCloudTokenUsage } = require('./db');
 
 // ── Circuit Breaker ───────────────────────────────────────────
 const CIRCUIT_RESET_MS = 5 * 60 * 1000;
@@ -148,10 +149,27 @@ async function routeToLLM(prompt, tier = 'fast') {
 
   console.log(`🤖 LLM Router: tier="${tier}", providers=${providers.map(p => p.name).join(' → ')}, ~${inputTokens} input tokens`);
 
+  const config = getConfig();
+  const limit = config.llm?.dailyCloudTokenLimit || 0;
+  let forceLocal = false;
+  if (limit > 0) {
+    const dailyUsage = getDailyCloudTokenUsage();
+    if (dailyUsage >= limit) {
+      console.log(`⚠️ Cloud token limit reached (${dailyUsage}/${limit}). Forcing local fallback.`);
+      forceLocal = true;
+    }
+  }
+
   let lastError = null;
 
   for (const provider of providers) {
     const isConfigError = (msg) => msg.includes('not set') || msg.includes('API key');
+
+    // Force local if cloud token limit reached
+    if (forceLocal && !provider.name.startsWith('ollama')) {
+      console.log(`  ⏭️  ${provider.name}: skipped (Cloud limit reached)`);
+      continue;
+    }
 
     // Skip providers whose API key isn't set
     if (provider.envKey && !process.env[provider.envKey]) {

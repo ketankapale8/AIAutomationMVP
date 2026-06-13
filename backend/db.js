@@ -186,6 +186,21 @@ function getAnalyticsSummary() {
   };
 }
 
+/**
+ * Returns the total number of tokens (input + output) used by cloud providers today.
+ */
+function getDailyCloudTokenUsage() {
+  const database = getDb();
+  // We assume any provider not starting with 'ollama' is a cloud provider
+  const row = database.prepare(`
+    SELECT SUM(input_tokens + output_tokens) as total 
+    FROM ticket_analyses 
+    WHERE llm_provider NOT LIKE 'ollama%' 
+      AND date(created_at) = date('now', 'localtime')
+  `).get();
+  return row.total || 0;
+}
+
 // ── Repo Index Status ───────────────────────────────────────
 
 /**
@@ -199,8 +214,8 @@ function upsertRepoStatus(data) {
     ON CONFLICT(repo_id) DO UPDATE SET
       repo_name = excluded.repo_name,
       local_path = excluded.local_path,
-      total_files = excluded.total_files,
-      total_chunks = excluded.total_chunks,
+      total_files = COALESCE(NULLIF(excluded.total_files, 0), total_files),
+      total_chunks = COALESCE(NULLIF(excluded.total_chunks, 0), total_chunks),
       last_indexed_at = excluded.last_indexed_at,
       status = excluded.status
   `).run({
@@ -265,6 +280,7 @@ module.exports = {
   getLatestAnalysis,
   getAllAnalyses,
   getAnalyticsSummary,
+  getDailyCloudTokenUsage,
   upsertRepoStatus,
   getAllRepoStatus,
   startIndexLog,

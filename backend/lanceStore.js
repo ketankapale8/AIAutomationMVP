@@ -149,7 +149,7 @@ async function removeDocumentsForFile(filePath, repoId = 'default') {
     const table = await getTable(repoId);
     // Escape single quotes in path
     const safeFilePath = String(filePath).replace(/'/g, "\\'");
-    await table.delete(`filePath = '${safeFilePath}'`);
+    await table.delete(`"filePath" = '${safeFilePath}'`);
   } catch (err) {
     // Table may not exist yet if this is the first index run — that's fine
     if (!err.message.includes('does not exist')) {

@@ -26,15 +26,19 @@ export default function TicketsPage() {
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
-  const load = useCallback(() => {
-    setLoading(true);
+  const load = useCallback((isBackground = false) => {
+    if (!isBackground) setLoading(true);
     axios.get(`${BASE}/api/tickets?limit=100`)
       .then(r => setTickets(r.data.tickets || []))
       .catch(() => setTickets([]))
-      .finally(() => setLoading(false));
+      .finally(() => { if (!isBackground) setLoading(false); });
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+    const intervalId = setInterval(() => load(true), 5000);
+    return () => clearInterval(intervalId);
+  }, [load]);
 
   const openDetail = async (key) => {
     setSelected(key);

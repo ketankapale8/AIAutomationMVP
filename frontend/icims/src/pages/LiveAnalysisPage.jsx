@@ -173,26 +173,19 @@ function WaitingState() {
 
       <div style={{ borderTop: '1px solid var(--border)', paddingTop: 24 }}>
         <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--cyan)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 20 }}>
-          Quick Setup — Connect Jira Webhook
+          How it Works — Auto-Polling
         </div>
 
         {[
-          { n: 1, title: 'Expose port 5001 to the internet', code: 'npx localtunnel --port 5001', note: 'Alternative: ngrok http 5001' },
-          { n: 2, title: 'Add Webhook URL in Jira Settings', code: 'https://<your-tunnel-url>/api/jira-webhook', note: 'Jira Settings → System → Webhooks → Create' },
-          { n: 3, title: 'Select trigger: Issue Created', code: null, note: 'Check "created" and "updated" under Issue events' },
-          { n: 4, title: 'Create a ticket — analysis fires automatically', code: null, note: null },
+          { n: 1, title: 'Create a ticket on your Jira board', code: null, note: 'Any new ticket in your configured projects will be detected.' },
+          { n: 2, title: 'Backend polls Jira API', code: null, note: 'The backend checks for new tickets every 30 seconds automatically.' },
+          { n: 3, title: 'Analysis runs in the background', code: null, note: 'LanceDB fetches code context, and your LLM generates a solution.' },
+          { n: 4, title: 'Result appears here', code: null, note: 'This page will automatically update as soon as the analysis is ready!' },
         ].map(step => (
           <div key={step.n} style={{ display: 'flex', gap: 16, marginBottom: 20 }}>
             <div style={{ width: 28, height: 28, flexShrink: 0, borderRadius: '50%', background: 'var(--violet-dim)', border: '1px solid rgba(168,85,247,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, color: 'var(--violet)' }}>{step.n}</div>
             <div>
               <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text-1)' }}>{step.title}</div>
-              {step.code && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#090714', border: '1px solid var(--border)', borderRadius: 6, padding: '8px 12px', margin: '6px 0', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--violet)' }}>
-                  <span style={{ flex: 1 }}>{step.code}</span>
-                  <button style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', padding: '3px 8px', borderRadius: 4, cursor: 'pointer', fontSize: 11 }}
-                    onClick={() => navigator.clipboard.writeText(step.code)}>Copy</button>
-                </div>
-              )}
               {step.note && <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>{step.note}</div>}
             </div>
           </div>

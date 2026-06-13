@@ -120,6 +120,9 @@ async function indexFile(absoluteFilePath, content, repoId, repoRootPath, fileHa
   for (const chunk of chunks) {
     try {
       const vector = await embeddings.embedText(chunk.content);
+      if (!vector) {
+        throw new Error("Embedding generation failed. All configured embedding providers (Ollama, Gemini, OpenAI) are offline or missing API keys.");
+      }
       docs.push({
         filePath: relativePath,
         content: chunk.content,

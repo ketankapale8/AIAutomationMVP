@@ -7,7 +7,7 @@
 ## What This Does
 
 Every time a Jira ticket is created, this tool:
-1. Receives the ticket via Jira webhook
+1. Detects the new ticket via Background Jira Polling
 2. Searches your codebase for relevant files (AI vector search)
 3. Sends ticket + relevant code to an LLM for analysis
 4. Posts the analysis as a comment back to your Jira ticket
@@ -78,16 +78,12 @@ Double-click **`start.bat`**
 
 Server starts on `http://localhost:5001`
 
-### Step 5 — Add Jira webhook
+### Step 5 — Auto-Polling Detection
 
-1. Go to **Jira → Settings → System → Webhooks**
-2. Click **Create a WebHook**
-3. Set URL: `http://YOUR-SERVER-IP:5001/api/jira-webhook`
-4. Select events: **Issue → created** ✅
-5. Save
-
-> **Exposing to Jira Cloud**: If Jira Cloud can't reach your internal server,
-> use a tunnel: `npx localtunnel --port 5001` or `npx ngrok http 5001`
+The backend automatically polls your Jira board every 30 seconds (configurable in `config.yaml`).
+- No Webhooks required!
+- No port forwarding or ngrok/localtunnel required!
+- Works completely behind corporate firewalls.
 
 ### Step 6 — Open the dashboard
 
@@ -123,7 +119,7 @@ Switch modes by editing `.env` — no restart needed, use `POST /api/config/relo
 | `Ollama not running` | Start Ollama desktop app or run `ollama serve` |
 | `nomic-embed-text not found` | Run `ollama pull nomic-embed-text` |
 | `Analysis takes 2+ minutes` | Normal for local models on CPU. Add GROQ_API_KEY for ~7s. |
-| `Jira webhook not firing` | Check Jira → Settings → Webhooks → Recent Deliveries |
+| `Not detecting new tickets` | Ensure `jiraProjects` in config match your Jira board project keys |
 | `0 chunks found` | Run `index.bat` first |
 | `Port 5001 in use` | Change port in `config.yaml` → `server.port` |
 

@@ -46,18 +46,20 @@ repos:
 # Controls which model tier is used per ticket type.
 # Models are tried left-to-right; first one with a configured API key wins.
 llm:
+  # Daily token limit for cloud providers. Auto-fallback to local Ollama if exceeded.
+  dailyCloudTokenLimit: 100000
   fast:
     # Used for: Bug, Task, Sub-task
     # ─ LOCAL  (default): qwen2.5-coder:3b via Ollama → ~60-90s, zero cost, offline
     # ─ DEMO   (add GROQ_API_KEY): groq llama-3.3-70b → ~7s
     # ─ PAID   (add ANTHROPIC_API_KEY): claude-haiku → ~3s, best quality
     providers:
-      - name: ollama
-        model: qwen2.5-coder:3b
-        baseUrl: "http://localhost:11434"
       - name: groq
         model: llama-3.3-70b-versatile
         envKey: GROQ_API_KEY
+      - name: ollama
+        model: qwen2.5-coder:3b
+        baseUrl: "http://localhost:11434"
       - name: anthropic
         model: claude-3-5-haiku-20241022
         envKey: ANTHROPIC_API_KEY
@@ -141,8 +143,14 @@ indexer:
   # Hash cache directory (relative to backend/)
   hashCachePath: "./data/hashes"
 
-# ── Jira Webhook ─────────────────────────────────────────────
+# ── Jira Webhook & Polling ───────────────────────────────────
 jira:
   # HMAC secret for webhook verification (set in .env as JIRA_WEBHOOK_SECRET)
   # Leave empty to skip verification in dev mode
   webhookSecretEnvKey: JIRA_WEBHOOK_SECRET
+
+jiraPolling:
+  # Set to true to enable outbound polling (bypasses inbound webhooks)
+  enabled: true
+  # How often to check for new tickets (in seconds)
+  intervalSeconds: 30
