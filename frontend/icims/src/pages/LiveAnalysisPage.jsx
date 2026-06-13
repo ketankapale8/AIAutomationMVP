@@ -24,6 +24,8 @@ export default function LiveAnalysisPage() {
     issueType: '',
     repoId: '',
     llmProvider: '',
+    degradedMode: false,
+    chunksUsed: 0,
   });
 
   useEffect(() => {
@@ -88,6 +90,11 @@ export default function LiveAnalysisPage() {
                   Format {data.format} — {fmt.label}
                 </span>
               )}
+              {data.degradedMode && (
+                <span className="badge" style={{ background: 'rgba(239,68,68,0.12)', color: '#f87171', borderColor: 'rgba(239,68,68,0.25)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  ⚠️ No Code Context
+                </span>
+              )}
             </div>
 
             <h3 style={{ fontSize: 17, fontWeight: 700, color: 'var(--text-1)', marginBottom: 16, lineHeight: 1.4 }}>
@@ -114,6 +121,12 @@ export default function LiveAnalysisPage() {
               <div>
                 <div style={{ color: 'var(--text-3)' }}>Repo</div>
                 <div style={{ color: 'var(--cyan)', fontWeight: 600, marginTop: 2 }}>{data.repoId || '—'}</div>
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ color: 'var(--text-3)' }}>Code Chunks</div>
+                <div style={{ color: data.chunksUsed > 0 ? 'var(--green, #4ade80)' : '#f87171', fontWeight: 600, marginTop: 2 }}>
+                  {data.chunksUsed > 0 ? `${data.chunksUsed} used` : 'none (degraded)'}
+                </div>
               </div>
               <div style={{ textAlign: 'right' }}>
                 <div style={{ color: 'var(--text-3)' }}>Model</div>

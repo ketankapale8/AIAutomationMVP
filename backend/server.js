@@ -61,8 +61,11 @@ let latestTicketAnalysis = {
   solution: 'No analysis generated yet.',
   images: [],
   jiraUrl: '',
-  format: null
+  format: null,
+  degradedMode: false,
+  chunksUsed: 0,
 };
+
 
 // ── Helper: Parse Atlassian Document Format (ADF) ────────────
 function parseADF(node) {
