@@ -5,7 +5,12 @@
 const path = require('path');
 const fs = require('fs');
 
-const DB_DIR = path.join(__dirname, 'data');
+// PKG: __dirname is a virtual snapshot; data must be written next to the exe
+const APP_DIR = process.pkg
+  ? path.dirname(process.execPath)
+  : __dirname;
+
+const DB_DIR = path.join(APP_DIR, 'data');
 const DB_PATH = path.join(DB_DIR, 'analyzer.db');
 
 let db = null;

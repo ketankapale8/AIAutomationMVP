@@ -13,8 +13,13 @@ const fs = require('fs');
 const path = require('path');
 
 // Manually load .env before importing any module that reads env vars
-if (fs.existsSync(path.join(__dirname, '.env'))) {
-  const envContent = fs.readFileSync(path.join(__dirname, '.env'), 'utf8');
+// PKG: __dirname is virtual snapshot path; use process.execPath dir for real .env location
+const APP_DIR = process.pkg
+  ? path.dirname(process.execPath)
+  : __dirname;
+
+if (fs.existsSync(path.join(APP_DIR, '.env'))) {
+  const envContent = fs.readFileSync(path.join(APP_DIR, '.env'), 'utf8');
   envContent.split('\n').forEach(line => {
     const match = line.match(/^\s*([\w.-]+)\s*=\s*(.*)?/);
     if (match) {

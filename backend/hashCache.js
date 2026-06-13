@@ -10,12 +10,17 @@ const path = require('path');
 const crypto = require('crypto');
 const { getIndexerConfig } = require('./configLoader');
 
+// PKG: __dirname is a virtual snapshot; data must be written next to the exe
+const APP_DIR = process.pkg
+  ? path.dirname(process.execPath)
+  : __dirname;
+
 /** Returns the directory for hash cache files */
 function getCacheDir() {
   const cfg = getIndexerConfig();
   const cacheDir = path.isAbsolute(cfg.hashCachePath)
     ? cfg.hashCachePath
-    : path.join(__dirname, cfg.hashCachePath);
+    : path.join(APP_DIR, cfg.hashCachePath);
   if (!fs.existsSync(cacheDir)) {
     fs.mkdirSync(cacheDir, { recursive: true });
   }

@@ -6,6 +6,11 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 
+// PKG: __dirname is a virtual snapshot; data lives next to the exe
+const APP_DIR = process.pkg
+  ? path.dirname(process.execPath)
+  : __dirname;
+
 async function validateEnvironment() {
   console.log('\n╔══════════════════════════════════════════════════════╗');
   console.log('║     Agentic Jira Analyzer v2.0 — Environment Check  ║');
@@ -46,7 +51,7 @@ async function validateEnvironment() {
 
   // ── 3. LanceDB index ──────────────────────────────────────────
   try {
-    const lanceDbPath = path.join(__dirname, 'data', 'lancedb');
+    const lanceDbPath = path.join(APP_DIR, 'data', 'lancedb');
     const exists = fs.existsSync(lanceDbPath);
     if (exists) {
       const tables = fs.readdirSync(lanceDbPath).filter(f => !f.startsWith('.'));

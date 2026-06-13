@@ -8,6 +8,11 @@ const yaml = require('js-yaml');
 
 let _config = null;
 
+// PKG: __dirname is virtual snapshot path; config.yaml lives next to the exe
+const APP_DIR = process.pkg
+  ? path.dirname(process.execPath)
+  : __dirname;
+
 /**
  * Loads and parses config.yaml (cached after first call).
  * @returns {object} Parsed config object
@@ -15,7 +20,7 @@ let _config = null;
 function getConfig() {
   if (_config) return _config;
 
-  const configPath = path.join(__dirname, 'config.yaml');
+  const configPath = path.join(APP_DIR, 'config.yaml');
   if (!fs.existsSync(configPath)) {
     throw new Error(`config.yaml not found at ${configPath}. Please create it from config.yaml.example.`);
   }

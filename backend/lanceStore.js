@@ -13,6 +13,11 @@ const path = require('path');
 const fs = require('fs');
 const { getIndexerConfig } = require('./configLoader');
 
+// PKG: __dirname is a virtual snapshot; data must be written next to the exe
+const APP_DIR = process.pkg
+  ? path.dirname(process.execPath)
+  : __dirname;
+
 // Lazy-loaded LanceDB module (avoid import failure if not installed yet)
 let lancedb = null;
 let db = null;
@@ -26,7 +31,7 @@ function getDbPath() {
   const cfg = getIndexerConfig();
   const dbPath = path.isAbsolute(cfg.lanceDbPath)
     ? cfg.lanceDbPath
-    : path.join(__dirname, cfg.lanceDbPath);
+    : path.join(APP_DIR, cfg.lanceDbPath);
   if (!fs.existsSync(dbPath)) {
     fs.mkdirSync(dbPath, { recursive: true });
   }

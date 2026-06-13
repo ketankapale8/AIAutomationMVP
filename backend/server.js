@@ -19,8 +19,15 @@ const path = require('path');
 const crypto = require('crypto');
 
 // ── Load .env ────────────────────────────────────────────────
-if (fs.existsSync(path.join(__dirname, '.env'))) {
-  const envContent = fs.readFileSync(path.join(__dirname, '.env'), 'utf8');
+// PKG bundles code into a virtual snapshot; __dirname resolves inside the exe.
+// For files that live NEXT TO the exe (.env, config.yaml) we must use the
+// real executable directory instead.
+const APP_DIR = process.pkg
+  ? path.dirname(process.execPath)   // running as pkg exe  → folder containing the .exe
+  : __dirname;                        // running with node    → backend/
+
+if (fs.existsSync(path.join(APP_DIR, '.env'))) {
+  const envContent = fs.readFileSync(path.join(APP_DIR, '.env'), 'utf8');
   envContent.split('\n').forEach(line => {
     const match = line.match(/^\s*([\w.-]+)\s*=\s*(.*)?/);
     if (match) {
