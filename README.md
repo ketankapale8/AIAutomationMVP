@@ -1,6 +1,6 @@
-# Agentic JIRA Ticket Technical Analyzer (Scalable RAG Edition)
+# Agentic JIRA Ticket Technical Analyzer v2.2 (Offline RAG Edition)
 
-An automated technical analysis engine that intercepts Jira issue creation events in real-time, queries a local semantic vector database to retrieve context-aware code chunks (avoiding full repository scans), and leverages high-speed Cloud LLMs (via Groq/Gemini/DeepSeek/OpenAI) to generate instant code-level recommendations and architectural solutions.
+An automated technical analysis engine packaged as a **standalone Windows executable** that intercepts Jira issue creation events in real-time, queries an embedded **LanceDB** vector database to retrieve context-aware code chunks (avoiding full repository scans), and leverages high-speed **Cloud LLMs** (via Groq/Gemini/Anthropic) or **Local Models** (Ollama) to generate instant code-level recommendations.
 
 ---
 
@@ -9,132 +9,91 @@ An automated technical analysis engine that intercepts Jira issue creation event
 ### Efficient RAG System (Two-Phase Execution)
 ```mermaid
 sequenceDiagram
-    actor Dev as Developer / Git Push
+    actor Dev as Developer
     actor User as Product / Project Manager
     participant Jira as Atlassian Jira Cloud
-    participant Webhook as /api/git-webhook
-    participant Indexer as Offline Indexer (indexer.js)
-    participant VectorDB as Vector Database (vector_store.json)
-    participant Backend as Node/Express Backend (/api/jira-webhook)
-    participant LLM as Groq / Gemini / DeepSeek API
+    participant Executable as analyzer-win.exe
+    participant VectorDB as LanceDB (Embedded)
+    participant LLM as Ollama / Groq / Gemini
 
     %% Phase 1: Offline Indexing
-    Note over Dev, VectorDB: Phase 1: Codebase Indexing (Offline or Real-time Git push)
-    Dev->>Indexer: Run indexer (npm run index)
-    Indexer->>Indexer: Split code into overlapping chunks (chunker.js)
-    Indexer->>LLM: Generate code embeddings (embeddings.js)
-    LLM-->>Indexer: Return vectors
-    Indexer->>VectorDB: Save chunks + embeddings + metadata
-    
-    %% Phase 1b: Webhook Synch
-    Dev->>Webhook: git push commits
-    Webhook->>VectorDB: Delete stale chunks for modified files
-    Webhook->>Indexer: Re-index modified files incrementally
+    Note over Dev, VectorDB: Phase 1: Codebase Indexing (Offline)
+    Dev->>Executable: Run index.bat
+    Executable->>Executable: Read config.yaml & hashCache.js
+    Executable->>LLM: Generate code embeddings via Ollama (nomic-embed-text)
+    LLM-->>Executable: Return vectors
+    Executable->>VectorDB: Save chunks + embeddings + metadata to data/lancedb
     
     %% Phase 2: Per-Ticket Analysis
-    Note over User, LLM: Phase 2: Jira Webhook Analysis (Online / Per-ticket)
+    Note over User, LLM: Phase 2: Jira Webhook Analysis (Online or Offline)
     User->>Jira: Create / Edit Scrum Board Ticket
-    Jira->>Backend: Post webhook event
-    Backend->>LLM: 1. Generate query embedding for ticket text
-    LLM-->>Backend: Return query vector
-    Backend->>VectorDB: 2. Query top-k relevant code chunks (Cosine Similarity)
-    VectorDB-->>Backend: Return top 15 matching snippets with line numbers
-    Backend->>LLM: 3. Send prompt (Ticket + Relevant Chunks context)
-    LLM-->>Backend: Return final technical analysis & code fixes
-    Backend->>Jira: Post comment back to ticket
+    Jira->>Executable: Post webhook event to port 5001
+    Executable->>LLM: 1. Generate query embedding for ticket text
+    LLM-->>Executable: Return query vector
+    Executable->>VectorDB: 2. Query top-k relevant code chunks
+    VectorDB-->>Executable: Return top 15 matching snippets with line numbers
+    Executable->>LLM: 3. Send prompt (Ticket + Relevant Chunks context)
+    LLM-->>Executable: Return final technical analysis & code fixes
+    Executable->>Jira: Post comment back to ticket
 ```
 
 ---
 
 ## 🛠️ Technology Stack
 
-* **Frontend**: React (Vite), Glassmorphism styling system, Axios polling.
-* **Backend**: Node.js, Express, Axios client.
+* **Standalone Binary**: Packaged using `pkg` — runs without Node.js installation on client machines.
 * **Semantic Search Engine**:
-  * **Chuncker**: Custom lines-aware code splitter with overlap bounds.
-  * **Embeddings Handler**: Multi-provider wrapper supporting OpenAI (`text-embedding-3-small`), Google Gemini (`text-embedding-004`), and local Ollama (`nomic-embed-text`).
-  * **Local Vector Store**: Built-in Javascript vector engine executing high-speed in-memory cosine similarity checks, persisted in `vector_store.json` (zero native C++ dependencies for seamless Windows compatibility).
-* **Integrations**:
-  * **Jira Webhooks**: Real-time HTTP trigger events.
-  * **Git Push Webhooks**: Real-time incremental source index synchronizations.
+  * **Embeddings**: Local Ollama (`nomic-embed-text`).
+  * **Local Vector Store**: **LanceDB** built-in, persisting vectors inside the local `data/lancedb/` folder (Zero external database dependencies).
+* **LLM Router Engine**:
+  * **Offline Default**: Local `qwen2.5-coder:3b` via Ollama.
+  * **Cloud Fallbacks**: Groq (`llama-3.3-70b`), Anthropic (`claude-3-5-sonnet`), Gemini.
 
 ---
 
-## ⚙️ Configuration & Environment Variables
+## 📦 Distribution & Client Setup
 
-Create a `.env` file inside the `backend/` folder based on `backend/.env.example`:
+The system is delivered to clients as a single ZIP folder containing:
+1. `analyzer-win.exe`
+2. `config.yaml`
+3. `.env`
+4. `index.bat` and `start.bat`
 
+### 1. Setup Environment
+Clients open `.env` and configure:
 ```env
-# 1. LLM API Key (Backend uses this key order for embeddings & content)
-DEEPSEEK_API_KEY=your_deepseek_api_key
-GEMINI_API_KEY=your_gemini_api_key
-GROQ_API_KEY=your_groq_api_key
-OPENAI_API_KEY=your_openai_api_key
+# Optional: Add cloud API keys for 2-second generation speeds
+GROQ_API_KEY=gsk_...
 
-# 2. GitHub REST API Access (For Cloud Indexing - Option A)
-GITHUB_TOKEN=your_github_personal_access_token
-GITHUB_OWNER=your_github_username_or_org
-GITHUB_REPO=your_target_repository_name
-GITHUB_BRANCH=main
-
-# 3. Local Workspace Path (For Local Files Indexing - Option B)
-# If left blank, defaults to '../repo/nextjs-dnd/src'
-REPO_PATH=c:\AIAutomationMVP\repo\nextjs-dnd\src
-
-# 4. Local Ollama Fallback Settings (If no cloud API keys are present)
-OLLAMA_EMBED_URL=http://localhost:11434/api/embeddings
-OLLAMA_EMBED_MODEL=nomic-embed-text
+# Required: Jira Webhook configuration
+JIRA_DOMAIN=yourcompany.atlassian.net
+JIRA_EMAIL=you@email.com
+JIRA_API_TOKEN=ATATT...
 ```
+
+### 2. Configure Repositories
+Clients open `config.yaml` to map their local repositories and Jira projects:
+```yaml
+repositories:
+  - id: "core-platform"
+    name: "Core Platform API"
+    localPath: "C:\\path\\to\\their\\repo"
+    jiraProjects: ["SCRUM", "CORE"]
+```
+
+### 3. Build Vector Index (One-Time)
+Clients double-click **`index.bat`**. The application scans their local repository, generates embeddings entirely offline using Ollama, and stores them in `data/lancedb/`.
+
+### 4. Start Server
+Clients double-click **`start.bat`**. The server boots up on `http://localhost:5001`.
 
 ---
 
-## 💻 Local Development Setup
+## ☁️ Jira Webhook Setup
 
-### 1. Backend Server Setup
-Navigate to the `backend` folder and install dependencies:
-```bash
-cd backend
-npm install
-```
+1. In Jira Cloud, go to **Jira Settings > System > Webhooks**.
+2. Set the **URL** to: `http://<client-server-ip>:5001/api/jira-webhook`.
+3. Check **Issue: Created** and **Issue: Updated**.
+4. Click **Save**.
 
-### 2. Run Codebase Indexing (Offline/Initial Setup)
-Ensure you have either a cloud API key configured in `.env` (Gemini or OpenAI) or local Ollama running with the `nomic-embed-text` model:
-```bash
-# To run Ollama locally
-ollama pull nomic-embed-text
-
-# Index the codebase
-npm run index
-```
-*This will create the codebase cache file `vector_store.json` inside the `backend/` directory.*
-
-### 3. Start the Backend Server
-```bash
-npm start
-```
-*The server will run on `http://localhost:5001`.*
-
-### 4. Start the Frontend Dashboard
-Navigate to the `frontend/icims` folder:
-```bash
-cd ../frontend/icims
-npm install
-npm run dev
-```
-*The client dashboard will run on `http://localhost:5173`.*
-
----
-
-## ☁️ Cloud Deployment & Webhooks
-
-### Jira Webhook Setup
-1. In your Atlassian Jira Cloud instance, go to **Jira Settings > System > Webhooks**.
-2. Set the **URL** to: `https://<your-backend-domain>/api/jira-webhook`.
-3. Check **Issue: Created** and **Issue: Updated** under the Trigger Events list and click **Save**.
-
-### Git Push Webhook Setup (Incremental Updates)
-To sync your database instantly when new code commits are pushed:
-1. In your GitHub repository settings, navigate to **Webhooks > Add webhook**.
-2. Set the **Payload URL** to: `https://<your-backend-domain>/api/git-webhook`.
-3. Select **Content type** as `application/json`.
-4. Choose **Just the push event** and click **Add webhook**.
+Whenever a ticket is created under the configured `jiraProjects` prefixes, the executable will intercept the payload, query LanceDB for the relevant source code files, and post a technical analysis back to the ticket automatically.
