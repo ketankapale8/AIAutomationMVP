@@ -1,4 +1,5 @@
 @echo off
+cd /d "%~dp0"
 title Jira Analyzer v2.0 — Server
 color 0A
 echo.
@@ -14,11 +15,16 @@ echo.
 
 :: Check if .env exists
 if not exist ".env" (
-  echo  [WARNING] .env file not found!
-  echo  Copy .env.template to .env and fill in your credentials.
-  echo.
-  pause
-  exit /b 1
+  if exist ".env.template" (
+    copy ".env.template" ".env" >nul
+    echo  [INFO] Created .env file from template.
+  ) else (
+    echo  [WARNING] .env file not found!
+    echo  Please create a .env file with your credentials.
+    echo.
+    pause
+    exit /b 1
+  )
 )
 
 :: Start the server (exe mode or node mode)
