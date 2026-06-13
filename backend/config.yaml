@@ -70,12 +70,12 @@ llm:
 
   balanced:
     # Used for: Story, Improvement, Feature
-    # ─ LOCAL  (default): deepseek-coder:6.7b via Ollama → ~90-150s, offline
+    # ─ LOCAL  (default): qwen2.5-coder:7b via Ollama → ~90-150s, offline
     # ─ DEMO   (add GROQ_API_KEY): groq llama-3.3-70b → ~9s
     # ─ PAID   (add ANTHROPIC_API_KEY): claude-sonnet → best reasoning
     providers:
       - name: ollama
-        model: deepseek-coder:6.7b-instruct
+        model: qwen2.5-coder:3b
         baseUrl: "http://localhost:11434"
       - name: groq
         model: llama-3.3-70b-versatile
@@ -97,7 +97,7 @@ llm:
     # ─ PAID   (add ANTHROPIC_API_KEY): claude-sonnet → highest quality architecture analysis
     providers:
       - name: ollama
-        model: deepseek-coder:6.7b-instruct
+        model: qwen2.5-coder:3b
         baseUrl: "http://localhost:11434"
       - name: groq
         model: llama-3.3-70b-versatile
