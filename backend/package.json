@@ -1,12 +1,15 @@
 {
   "name": "backend",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
     "index": "node indexer.js",
     "index:full": "node indexer.js --force",
+    "build": "npx pkg server.js --config pkg.config.json --targets node18-win-x64 --output ../dist/analyzer-win.exe",
+    "dist:copy": "node -e \"const fs=require('fs'); fs.copyFileSync('config.yaml','../dist/config.yaml'); console.log('✅ config.yaml copied to dist/')\"",
+    "dist:full": "npm run build && npm run dist:copy",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -14,6 +17,7 @@
   "license": "ISC",
   "description": "Agentic Jira Ticket Analyzer — Production Backend",
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.104.1",
     "@lancedb/lancedb": "^0.17.0",
     "apache-arrow": "^18.0.0",
     "axios": "^1.17.0",
@@ -23,6 +27,10 @@
     "fs": "^0.0.1-security",
     "js-yaml": "^4.1.0",
     "nodemon": "^3.1.14",
-    "path": "^0.12.7"
+    "path": "^0.12.7",
+    "simple-git": "^3.36.0"
+  },
+  "devDependencies": {
+    "pkg": "^5.8.1"
   }
 }

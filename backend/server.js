@@ -42,6 +42,8 @@ const { buildPrompt } = require('./promptBuilder');
 const { routeToLLM } = require('./llmRouter');
 const configLoader = require('./configLoader');
 const db = require('./db');
+const { validateEnvironment } = require('./firstRun');
+
 
 const app = express();
 app.use(cors());
@@ -686,9 +688,10 @@ app.post('/api/config/reload', (req, res) => {
 const cfg = (() => { try { return configLoader.getConfig(); } catch { return { server: { port: 3001 } }; } })();
 const PORT = process.env.PORT || cfg.server?.port || 3001;
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`\n🚀 Agentic Jira Ticket Analyzer v2.0 — running on http://localhost:${PORT}`);
   console.log(`   Config: config.yaml | DB: data/analyzer.db | Vector: data/lancedb/`);
   console.log(`   Repos: ${configLoader.getAllRepos().map(r => r.id).join(', ')}`);
-  console.log(`   Run 'npm run index' to build the vector index for the first time.\n`);
+  // Run environment validator (non-blocking — server is already accepting requests)
+  await validateEnvironment();
 });

@@ -25,14 +25,19 @@ repos:
   # ── Add more repos below as needed ──────────────────────────
   # - id: backend-api
   #   name: "Backend API Service"
-  #   localPath: "C:\\Projects\\backend-api"
+  #   localPath: "C:\\Analyzer\\repos\\backend-api"
+  #   # Optional: auto-clone from git (clones on first index run, pulls on subsequent runs)
+  #   # gitUrl: "https://github.com/mycompany/backend-api"
+  #   # gitBranch: "main"           # default: main
+  #   # gitToken: ""               # or use GIT_TOKEN env var for private repos
   #   extensions: [".js", ".ts", ".json", ".yaml"]
   #   excludeDirs: ["node_modules", ".git", "dist"]
   #   jiraProjects: ["API", "BACK"]
   #
   # - id: mobile-app
   #   name: "Mobile App"
-  #   localPath: "C:\\Projects\\mobile"
+  #   localPath: "C:\\Analyzer\\repos\\mobile"
+  #   # gitUrl: "https://github.com/mycompany/mobile-app"
   #   extensions: [".swift", ".kt", ".tsx"]
   #   excludeDirs: ["node_modules", ".git", "Pods"]
   #   jiraProjects: ["MOB", "IOS"]

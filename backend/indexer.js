@@ -231,6 +231,9 @@ async function indexRepo(repoConfig, { force = false } = {}) {
 /**
  * Main run function — indexes all repos defined in config.yaml.
  * Pass --force to ignore hash cache and re-index everything.
+ *
+ * If a repo has `gitUrl` set, it will be cloned/pulled automatically.
+ * Set GIT_TOKEN env var for private repos.
  */
 async function runIndexer() {
   const force = process.argv.includes('--force');
@@ -245,6 +248,46 @@ async function runIndexer() {
 
   console.log(`   Repos to index: ${repos.map(r => r.id).join(', ')}`);
 
+  // ── Git auto-clone / pull ─────────────────────────────────────
+  for (const repo of repos) {
+    if (!repo.gitUrl) continue;
+
+    try {
+      const simpleGit = require('simple-git');
+      const token = process.env.GIT_TOKEN || repo.gitToken || '';
+      const branch = repo.gitBranch || 'main';
+
+      // Inject auth token into URL for private repos
+      let cloneUrl = repo.gitUrl;
+      if (token && cloneUrl.startsWith('https://')) {
+        const urlObj = new URL(cloneUrl);
+        urlObj.username = 'oauth2';
+        urlObj.password = token;
+        cloneUrl = urlObj.toString();
+      }
+
+      const localPath = repo.localPath;
+      const gitDir = require('path').join(localPath, '.git');
+
+      if (!require('fs').existsSync(gitDir)) {
+        // First run — clone
+        console.log(`\n📥 Cloning ${repo.id} from ${repo.gitUrl}...`);
+        require('fs').mkdirSync(localPath, { recursive: true });
+        await simpleGit().clone(cloneUrl, localPath, ['--branch', branch, '--depth', '1']);
+        console.log(`  ✅ Cloned to ${localPath}`);
+      } else {
+        // Subsequent runs — pull latest
+        console.log(`\n🔄 Pulling latest for ${repo.id} (branch: ${branch})...`);
+        await simpleGit(localPath).pull('origin', branch);
+        console.log(`  ✅ Pulled latest changes`);
+      }
+    } catch (err) {
+      console.error(`  ⚠️  Git operation failed for ${repo.id}: ${err.message}`);
+      console.error(`     Will index from existing localPath if it exists.`);
+    }
+  }
+
+  // ── Index each repo ───────────────────────────────────────────
   for (const repo of repos) {
     try {
       await indexRepo(repo, { force });
