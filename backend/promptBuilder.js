@@ -288,8 +288,19 @@ Any ambiguities, dependencies, or risks the team should resolve before starting.
  * @returns {{ prompt: string, format: string, tier: string, estimatedTokens: number }}
  */
 function buildPrompt({ title, description, issueType, chunks, tokenBudget, repoPath }) {
-  const format = detectFormat(issueType);
-  const tier = detectLLMTier(issueType);
+  // Fallback title keyword upgrade: if issueType says Task/Bug but title starts with Story/Feature/Epic, override type
+  let resolvedType = issueType || 'Task';
+  const cleanTitle = (title || '').toLowerCase().trim();
+  if (cleanTitle.startsWith('story:') || cleanTitle.startsWith('story ')) {
+    resolvedType = 'Story';
+  } else if (cleanTitle.startsWith('feature:') || cleanTitle.startsWith('feature ')) {
+    resolvedType = 'Feature';
+  } else if (cleanTitle.startsWith('epic:') || cleanTitle.startsWith('epic ')) {
+    resolvedType = 'Epic';
+  }
+
+  const format = detectFormat(resolvedType);
+  const tier = detectLLMTier(resolvedType);
 
   const fileTree = repoPath ? getFileTree(repoPath, 0, 3) : '';
 

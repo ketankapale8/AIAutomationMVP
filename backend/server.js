@@ -47,7 +47,7 @@ const embeddings = require('./embeddings');
 const lanceStore = require('./lanceStore');
 const { indexSingleFile } = require('./indexer');
 const { buildPrompt } = require('./promptBuilder');
-const { routeToLLM } = require('./llmRouter');
+const { routeToLLM, classifyTicketComplexity } = require('./llmRouter');
 const configLoader = require('./configLoader');
 const db = require('./db');
 const { validateEnvironment } = require('./firstRun');
@@ -287,17 +287,32 @@ const processAnalysis = async (ticketKey, title, description, imagePaths, jiraUr
     degradedMode = true;
   }
 
-  // 3. Build the prompt (token-budgeted, format auto-detected)
+  // 3. Resolve ticket format, complexity tier, and token budget
+  let resolvedIssueType = issueType || 'Task';
+  const isDeterministicFormatB = ['story', 'feature', 'new feature', 'epic', 'improvement', 'enhancement', 'initiative', 'architecture'].includes(resolvedIssueType.toLowerCase()) ||
+    (title || '').toLowerCase().trim().startsWith('story') ||
+    (title || '').toLowerCase().trim().startsWith('feature') ||
+    (title || '').toLowerCase().trim().startsWith('epic');
+
+  let resolvedFormat = isDeterministicFormatB ? 'formatB' : 'formatA';
+
+  // If it's a generic Task/Bug, ask the LLM to classify its complexity to see if we should elevate it
+  if (!isDeterministicFormatB) {
+    const complexity = await classifyTicketComplexity(title, description);
+    if (complexity === 'balanced') {
+      console.log(`⚡ Complexity Classifier elevated ticket [${ticketKey}] to COMPLEX → upgrading to balanced tier`);
+      resolvedIssueType = 'Story'; // elevating forces Format B & Deepseek routing
+      resolvedFormat = 'formatB';
+    }
+  }
+
   const { prompt, format, tier, estimatedInputTokens, usedChunks } = buildPrompt({
     title,
     description,
-    issueType,
+    issueType: resolvedIssueType,
     chunks,
     repoPath: repoConfig ? repoConfig.localPath : null,
-    tokenBudget: configLoader.getTokenBudget(
-      ['story', 'feature', 'new feature', 'epic', 'improvement', 'enhancement', 'initiative', 'architecture'].includes((issueType || '').toLowerCase())
-        ? 'formatB' : 'formatA'
-    )
+    tokenBudget: configLoader.getTokenBudget(resolvedFormat)
   });
 
   console.log(`📝 Format: ${format} | Tier: ${tier} | Chunks used: ${usedChunks} | ~${estimatedInputTokens} input tokens`);
@@ -358,9 +373,11 @@ const processAnalysis = async (ticketKey, title, description, imagePaths, jiraUr
   latestTicketAnalysis = analysis;
   ticketAnalysesCache[ticketKey] = analysis;
 
-  // 8. Post analysis back to Jira as a comment
+  // 8. Post analysis back to Jira as a comment (async, don't block return)
   if (jiraUrl) {
-    postCommentToJira(ticketKey, technicalSolution, jiraUrl);
+    postCommentToJira(ticketKey, technicalSolution, jiraUrl).catch(err => 
+      console.error(`❌ Failed to post Jira comment:`, err.message)
+    );
   }
 
   return analysis;
@@ -749,7 +766,38 @@ app.listen(PORT, async () => {
   console.log(`\n🚀 Agentic Jira Ticket Analyzer v2.0 — running on http://localhost:${PORT}`);
   console.log(`   Config: config.yaml | DB: data/analyzer.db | Vector: data/lancedb/`);
   console.log(`   Repos: ${configLoader.getAllRepos().map(r => r.id).join(', ')}`);
-  
+
+  // ── Rehydrate in-memory cache from SQLite on startup ────────
+  // Without this, latestTicketAnalysis resets to "Waiting for ticket..." on every
+  // server restart, even if dozens of tickets have been analysed before.
+  try {
+    const recent = db.getAllAnalyses(1, 0); // fetch most recent row (no analysis text)
+    if (recent && recent.length > 0) {
+      const full = db.getLatestAnalysis(recent[0].issue_key); // fetch with analysis text
+      if (full) {
+        latestTicketAnalysis = {
+          key:         full.issue_key,
+          rawTitle:    full.title,
+          title:       `[${full.issue_key}] ${full.title}`,
+          description: full.description || '',
+          solution:    full.analysis   || '',
+          images:      [],
+          jiraUrl:     full.jira_url   || '',
+          format:      full.format     || null,
+          issueType:   full.issue_type || '',
+          repoId:      full.repo_id    || '',
+          llmProvider: full.llm_provider || '',
+          degradedMode: false,
+          chunksUsed:  0,
+        };
+        ticketAnalysesCache[full.issue_key] = latestTicketAnalysis;
+        console.log(`♻️  Rehydrated latest analysis from DB: [${full.issue_key}] ${full.title}`);
+      }
+    }
+  } catch (rehydrateErr) {
+    console.warn('⚠️ Could not rehydrate analysis cache from DB:', rehydrateErr.message);
+  }
+
   // Start the Jira Poller if enabled
   try {
     startPolling(configLoader.getConfig(), processAnalysis);

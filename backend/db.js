@@ -150,7 +150,7 @@ function getAllAnalyses(limit = 50, offset = 0) {
     SELECT id, issue_key, project_key, repo_id, title, issue_type, format, llm_provider,
            input_tokens, output_tokens, jira_url, created_at
     FROM ticket_analyses
-    ORDER BY created_at DESC
+    ORDER BY id DESC
     LIMIT ? OFFSET ?
   `).all(limit, offset);
 }

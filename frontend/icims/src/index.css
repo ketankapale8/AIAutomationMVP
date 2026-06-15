@@ -348,22 +348,29 @@ tbody tr:hover td { color: var(--text-1); }
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 20px;
+  padding: 40px;
   animation: fadeIn 0.2s ease;
 }
 
 .modal {
+  position: fixed;
+  top: 45%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   background: #0e0b1e;
   border: 1px solid var(--border-hover);
   border-radius: var(--radius-lg);
   max-width: 860px;
-  width: 100%;
-  max-height: 90vh;
+  width: 90%;
+  max-height: 80vh;
   display: flex;
   flex-direction: column;
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(168,85,247,0.1);
-  animation: slideUp 0.3s cubic-bezier(0.16,1,0.3,1);
+  z-index: 1010;
+  animation: modalFadeIn 0.3s cubic-bezier(0.16,1,0.3,1);
 }
+
+
 
 .modal-header {
   display: flex;
@@ -431,7 +438,7 @@ tbody tr:hover td { color: var(--text-1); }
 }
 
 @keyframes slideUp {
-  from { opacity: 0; transform: translateY(24px) scale(0.97); }
+  from { opacity: 0; transform: translateY(30px) scale(0.98); }
   to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
@@ -444,6 +451,11 @@ tbody tr:hover td { color: var(--text-1); }
 @keyframes pulse-glow {
   0%, 100% { opacity: 0.8; box-shadow: 0 0 0 0 rgba(0,242,254,0.4); }
   50%       { opacity: 1;   box-shadow: 0 0 0 6px rgba(0,242,254,0); }
+}
+
+@keyframes modalFadeIn {
+  from { opacity: 0; transform: translate(-50%, -46%) scale(0.98); }
+  to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 }
 
 .fade-in-up { animation: fadeInUp 0.5s cubic-bezier(0.16,1,0.3,1) both; }

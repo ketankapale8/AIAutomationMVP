@@ -4,6 +4,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "clean": "taskkill /F /IM node.exe || exit 0",
     "dev": "nodemon server.js",
     "index": "node indexer.js",
     "index:full": "node indexer.js --force",

@@ -18,7 +18,7 @@ repos:
     # Extensions to index
     extensions: [".tsx", ".ts", ".jsx", ".js", ".css", ".json", ".py", ".md"]
     # Directories to skip during scan
-    excludeDirs: ["node_modules", ".git", ".next", "dist", "build", ".pnpm-store"]
+    excludeDirs: ["node_modules", ".git", ".next", "dist", "build", ".pnpm-store", ".turbo", ".changeset", ".vscode", "pnpm-lock.yaml", "package-lock.json"]
     # Jira project keys that map to this repo (e.g. ticket SCRUM-101 → prozilla-os repo)
     jiraProjects: ["SCRUM", "PROZILLA", "POS"]
 
@@ -54,12 +54,12 @@ llm:
     # ─ DEMO   (add GROQ_API_KEY): groq llama-3.3-70b → ~7s
     # ─ PAID   (add ANTHROPIC_API_KEY): claude-haiku → ~3s, best quality
     providers:
-      - name: groq
-        model: llama-3.3-70b-versatile
-        envKey: GROQ_API_KEY
       - name: ollama
         model: qwen2.5-coder:3b
         baseUrl: "http://localhost:11434"
+      - name: groq
+        model: llama-3.3-70b-versatile
+        envKey: GROQ_API_KEY
       - name: anthropic
         model: claude-3-5-haiku-20241022
         envKey: ANTHROPIC_API_KEY
@@ -72,7 +72,7 @@ llm:
 
   balanced:
     # Used for: Story, Improvement, Feature
-    # ─ LOCAL  (default): qwen2.5-coder:7b via Ollama → ~90-150s, offline
+    # ─ LOCAL  (default): qwen2.5-coder:3b via Ollama → ~90-150s, offline
     # ─ DEMO   (add GROQ_API_KEY): groq llama-3.3-70b → ~9s
     # ─ PAID   (add ANTHROPIC_API_KEY): claude-sonnet → best reasoning
     providers:
@@ -94,7 +94,7 @@ llm:
 
   deep:
     # Used for: Epic, New Feature, Architecture
-    # ─ LOCAL  (default): deepseek-coder:6.7b via Ollama → ~120-180s, offline
+    # ─ LOCAL  (default): qwen2.5-coder:3b via Ollama → ~120-180s, offline
     # ─ DEMO   (add GROQ_API_KEY): groq llama-3.3-70b → ~12s
     # ─ PAID   (add ANTHROPIC_API_KEY): claude-sonnet → highest quality architecture analysis
     providers:

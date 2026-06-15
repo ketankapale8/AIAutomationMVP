@@ -64,6 +64,19 @@ export default function TicketsPage() {
 
   const uniqueTypes = [...new Set(tickets.map(t => t.issue_type).filter(Boolean))];
 
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+
+  // Reset page to 1 when filters or search change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, filterFormat, filterType]);
+
+  const totalPages = Math.ceil(filtered.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const paginatedTickets = filtered.slice(startIndex, startIndex + itemsPerPage);
+
   return (
     <div className="fade-in-up">
       <div className="page-header">
@@ -119,48 +132,90 @@ export default function TicketsPage() {
             <div className="empty-sub">Ticket analyses appear here after Jira webhooks fire. Make sure the indexer has run first.</div>
           </div>
         ) : (
-          <div className="table-wrapper">
-            <table>
-              <thead>
-                <tr>
-                  <th>Key</th>
-                  <th>Title</th>
-                  <th>Type</th>
-                  <th>Format</th>
-                  <th>Repo</th>
-                  <th>Model</th>
-                  <th>Tokens In</th>
-                  <th>Date</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map(t => (
-                  <tr key={t.id} onClick={() => openDetail(t.issue_key)} style={{ cursor: 'pointer' }}>
-                    <td>
-                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--violet)', fontWeight: 600 }}>{t.issue_key}</span>
-                    </td>
-                    <td style={{ maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-1)' }}>
-                      {t.title}
-                    </td>
-                    <td><span className={`badge ${getBadgeClass(t.issue_type)}`}>{t.issue_type || '—'}</span></td>
-                    <td>
-                      <span className={`badge badge-${(t.format || '').toLowerCase()}`}>
-                        {t.format ? `Format ${t.format}` : '—'}
-                      </span>
-                    </td>
-                    <td style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--text-3)' }}>{t.repo_id || '—'}</td>
-                    <td style={{ fontSize: 11.5, color: 'var(--text-3)', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {t.llm_provider || '—'}
-                    </td>
-                    <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--amber)' }}>{t.input_tokens?.toLocaleString() || '—'}</td>
-                    <td style={{ fontSize: 12, color: 'var(--text-3)', whiteSpace: 'nowrap' }}>
-                      {t.created_at ? new Date(t.created_at).toLocaleDateString() : '—'}
-                    </td>
+          <>
+            <div className="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Key</th>
+                    <th>Title</th>
+                    <th>Type</th>
+                    <th>Format</th>
+                    <th>Repo</th>
+                    <th>Model</th>
+                    <th>Tokens In</th>
+                    <th>Date</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {paginatedTickets.map(t => (
+                    <tr key={t.id} onClick={() => openDetail(t.issue_key)} style={{ cursor: 'pointer' }}>
+                      <td>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--violet)', fontWeight: 600 }}>{t.issue_key}</span>
+                      </td>
+                      <td style={{ maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-1)' }}>
+                        {t.title}
+                      </td>
+                      <td><span className={`badge ${getBadgeClass(t.issue_type)}`}>{t.issue_type || '—'}</span></td>
+                      <td>
+                        <span className={`badge badge-${(t.format || '').toLowerCase()}`}>
+                          {t.format ? `Format ${t.format}` : '—'}
+                        </span>
+                      </td>
+                      <td style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--text-3)' }}>{t.repo_id || '—'}</td>
+                      <td style={{ fontSize: 11.5, color: 'var(--text-3)', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {t.llm_provider || '—'}
+                      </td>
+                      <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--amber)' }}>{t.input_tokens?.toLocaleString() || '—'}</td>
+                      <td style={{ fontSize: 12, color: 'var(--text-3)', whiteSpace: 'nowrap' }}>
+                        {t.created_at ? new Date(t.created_at).toLocaleDateString() : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 24px', borderTop: '1px solid var(--border)', flexWrap: 'wrap', gap: 12 }}>
+                <div style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                  Showing <span style={{ color: 'var(--text-2)', fontWeight: 500 }}>{startIndex + 1}</span> to <span style={{ color: 'var(--text-2)', fontWeight: 500 }}>{Math.min(startIndex + itemsPerPage, filtered.length)}</span> of <span style={{ color: 'var(--text-2)', fontWeight: 500 }}>{filtered.length}</span> tickets
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button 
+                    className="btn btn-ghost btn-sm" 
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                    style={{ opacity: currentPage === 1 ? 0.4 : 1, cursor: currentPage === 1 ? 'not-allowed' : 'pointer' }}
+                  >
+                    ◀ Prev
+                  </button>
+                  {[...Array(totalPages)].map((_, index) => {
+                    const pageNum = index + 1;
+                    return (
+                      <button
+                        key={pageNum}
+                        className={`btn btn-sm ${currentPage === pageNum ? 'btn-primary' : 'btn-ghost'}`}
+                        onClick={() => setCurrentPage(pageNum)}
+                        style={{ minWidth: 32, justifyContent: 'center' }}
+                      >
+                        {pageNum}
+                      </button>
+                    );
+                  })}
+                  <button 
+                    className="btn btn-ghost btn-sm" 
+                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    disabled={currentPage === totalPages}
+                    style={{ opacity: currentPage === totalPages ? 0.4 : 1, cursor: currentPage === totalPages ? 'not-allowed' : 'pointer' }}
+                  >
+                    Next ▶
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
 
