@@ -705,6 +705,22 @@ app.get('/api/repos', async (req, res) => {
   }
 });
 
+app.post('/api/repos/:id/index', (req, res) => {
+  try {
+    const { spawn } = require('child_process');
+    const force = req.body.force === true;
+    const args = ['indexer.js'];
+    if (force) args.push('--force');
+    
+    const child = spawn('node', args, { stdio: 'inherit', detached: true });
+    child.unref();
+
+    res.json({ message: 'Indexing triggered successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Analytics ─────────────────────────────────────────────────
 app.get('/api/analytics', (req, res) => {
   try {
