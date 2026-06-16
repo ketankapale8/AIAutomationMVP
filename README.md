@@ -1,8 +1,15 @@
-# Agentic JIRA Ticket Technical Analyzer v2.2 (Offline RAG Edition)
+# Agentic JIRA Ticket Technical Analyzer v2.2 (Dual-Tier Edition)
 
-An automated technical analysis engine packaged as a **standalone Windows executable** that intercepts Jira issue creation events in real-time, queries an embedded **LanceDB** vector database to retrieve context-aware code chunks (avoiding full repository scans), and leverages high-speed **Cloud LLMs** (via Groq/Gemini/Anthropic) or **Local Models** (Ollama) to generate instant code-level recommendations.
+An automated technical analysis engine featuring a **Dual-Tier Architecture** that intercepts Jira issue events in real-time, matches them against codebase indexes using **Semantic Vector Search (RAG)**, and posts technical recommendations directly back to Jira.
 
 ---
+
+### 📂 POC Documentation & Architecture Review
+For managers and solution architects reviewing this Proof of Concept, please see the complete, detailed architectural design, decision log, trade-off analysis, and enterprise scaling strategy here:
+👉 **[POC Architecture Blueprint & Technical Documentation](file:///c:/AIAutomationMVP/docs/poc_architecture_blueprint.md)**
+
+---
+
 
 ## 🚀 Architectural Workflow
 
