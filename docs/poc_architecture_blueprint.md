@@ -164,3 +164,13 @@ Real-time analysis output triggered via Jira webhooks, detailing the complexity 
 Centralized log of all processed analyses retrieved dynamically from the database pool.
 ![Ticket History Analytics Log](screenshots/ticket_history.png)
 
+---
+
+## 9. Sample Output Reference
+
+For a complete, raw PDF export of a generated technical analysis from a real Jira ticket, refer to the document:
+👉 **[SampleAnalysisForATicket.pdf](SampleAnalysisForATicket.pdf)**
+
+---
+
+*Developed and maintained for iCIMS by **Ketan.K***
