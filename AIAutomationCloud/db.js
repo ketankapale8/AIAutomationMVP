@@ -106,6 +106,12 @@ async function initSchema() {
         finished_at TIMESTAMP WITH TIME ZONE
       );
     `);
+    
+    // Dynamically migrate table if it already existed in Supabase without the jira_comment_id column
+    await p.query(`
+      ALTER TABLE ticket_analyses ADD COLUMN IF NOT EXISTS jira_comment_id VARCHAR(100);
+    `);
+
     console.log('✅ Schema initialized or verified');
   } catch (err) {
     console.error('❌ Schema initialization failed:', err);
