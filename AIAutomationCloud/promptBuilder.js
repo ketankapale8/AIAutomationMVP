@@ -207,7 +207,8 @@ Keep total code snippets under 200 lines.
 
 **CONSTRAINTS:**
 1. Total response must be under 400 words. No conversational filler.
-2. CRITICAL: DO NOT INVENT OR GUESS FILE PATHS. You must ONLY suggest modifying files that are explicitly listed in the "Relevant Codebase Context" above. If you need to create a new file, use a realistic path based on the context.`;
+2. CRITICAL: If the "Relevant Codebase Context" section above is empty or does not contain code chunks matching the problem described in the ticket, you MUST respond exactly and only with: "This request is out of scope. I do not have the relevant code context to analyze this ticket."
+3. CRITICAL: DO NOT INVENT OR GUESS FILE PATHS. You must ONLY suggest modifying files that are explicitly listed in the "Relevant Codebase Context" above. If you need to create a new file, use a realistic path based on the context.`;
 }
 
 // ── Format B Prompt (Feature / Epic) ─────────────────────────
@@ -272,7 +273,8 @@ Any ambiguities, dependencies, or risks the team should resolve before starting.
 
 **CONSTRAINTS:** 
 1. Response should be 600–900 words. Use code examples sparingly (only for API schemas or complex logic).
-2. CRITICAL: DO NOT INVENT OR GUESS EXISTING FILE PATHS. When listing "Files to Modify", you must ONLY list files that explicitly appear in the "Existing Codebase Context" above.`;
+2. CRITICAL: If the "Existing Codebase Context" section above is empty or does not contain code chunks matching the problem described in the ticket, you MUST respond exactly and only with: "This request is out of scope. I do not have the relevant code context to analyze this ticket."
+3. CRITICAL: DO NOT INVENT OR GUESS EXISTING FILE PATHS. When listing "Files to Modify", you must ONLY list files that explicitly appear in the "Existing Codebase Context" above.`;
 }
 
 // ── Main export ───────────────────────────────────────────────

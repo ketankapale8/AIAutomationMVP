@@ -5,6 +5,10 @@ on:
     branches:
       - main
       - master
+  schedule:
+    # Run daily at 00:00 UTC (keeps embeddings fresh based on master updates)
+    - cron: '0 0 * * *'
+  workflow_dispatch: # Allows manual trigger from GitHub Actions UI
 
 jobs:
   index:
