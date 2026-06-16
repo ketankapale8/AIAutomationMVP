@@ -1,0 +1,113 @@
+// backend/firstRun.js
+// Validates the environment on startup and prints a clear status table.
+// Checks: config.yaml parse, Ollama reachability, Jira credentials, LLM providers.
+
+const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
+
+// PKG: __dirname is a virtual snapshot; data lives next to the exe
+const APP_DIR = process.pkg
+  ? path.dirname(process.execPath)
+  : __dirname;
+
+async function validateEnvironment() {
+  console.log('\n╔══════════════════════════════════════════════════════╗');
+  console.log('║     Agentic Jira Analyzer v2.0 — Environment Check  ║');
+  console.log('╚══════════════════════════════════════════════════════╝\n');
+
+  const checks = [];
+
+  // ── 1. config.yaml ────────────────────────────────────────────
+  try {
+    const { getConfig } = require('./configLoader');
+    const cfg = getConfig();
+    const repoCount = cfg.repos?.length || 0;
+    checks.push({ name: 'config.yaml', ok: repoCount > 0, detail: `${repoCount} repo(s) configured` });
+  } catch (e) {
+    checks.push({ name: 'config.yaml', ok: false, detail: e.message });
+  }
+
+  // ── 2. Ollama ──────────────────────────────────────────────────
+  try {
+    const ollamaUrl = process.env.OLLAMA_URL || 'http://localhost:11434';
+    const res = await axios.get(`${ollamaUrl}/api/tags`, { timeout: 5000 });
+    const models = res.data.models?.map(m => m.name) || [];
+    const hasEmbed = models.some(m => m.includes('nomic-embed'));
+    checks.push({
+      name: 'Ollama',
+      ok: models.length > 0,
+      detail: hasEmbed
+        ? `✅ ${models.length} model(s) — nomic-embed-text ready`
+        : `⚠️  ${models.length} model(s) — run: ollama pull nomic-embed-text`
+    });
+  } catch (e) {
+    checks.push({
+      name: 'Ollama',
+      ok: false,
+      detail: 'Not running — start Ollama or add a cloud API key to .env'
+    });
+  }
+
+  // ── 3. Supabase DB check ──────────────────────────────────────
+  try {
+    const hasDbUrl = !!(process.env.DATABASE_URL || process.env.SUPABASE_DB_URL);
+    checks.push({
+      name: 'Supabase Vector DB',
+      ok: hasDbUrl,
+      detail: hasDbUrl ? 'URL configured' : 'Add DATABASE_URL / SUPABASE_DB_URL to .env'
+    });
+  } catch (e) {
+    checks.push({ name: 'Supabase Vector DB', ok: false, detail: e.message });
+  }
+
+  // ── 4. Jira credentials ───────────────────────────────────────
+  const hasJiraDomain = !!process.env.JIRA_DOMAIN;
+  const hasJiraEmail  = !!process.env.JIRA_EMAIL;
+  const hasJiraToken  = !!process.env.JIRA_API_TOKEN;
+  const jiraOk = hasJiraDomain && hasJiraEmail && hasJiraToken;
+  checks.push({
+    name: 'Jira Credentials',
+    ok: jiraOk,
+    detail: jiraOk
+      ? `${process.env.JIRA_DOMAIN}`
+      : 'Add JIRA_DOMAIN, JIRA_EMAIL, JIRA_API_TOKEN to .env'
+  });
+
+  // ── 5. LLM providers available ───────────────────────────────
+  const providers = [];
+  if (process.env.GROQ_API_KEY)      providers.push('Groq ⚡');
+  if (process.env.ANTHROPIC_API_KEY) providers.push('Claude 🧠');
+  if (process.env.OPENAI_API_KEY)    providers.push('OpenAI');
+  if (process.env.GEMINI_API_KEY)    providers.push('Gemini');
+  if (process.env.DEEPSEEK_API_KEY)  providers.push('DeepSeek');
+  const ollamaCheck = checks.find(c => c.name === 'Ollama');
+  if (ollamaCheck?.ok) providers.push('Ollama (local)');
+
+  checks.push({
+    name: 'LLM Providers',
+    ok: providers.length > 0,
+    detail: providers.length > 0 ? providers.join(', ') : 'No providers! Add a key to .env or start Ollama'
+  });
+
+  // ── Print results ─────────────────────────────────────────────
+  const maxName = Math.max(...checks.map(c => c.name.length));
+  checks.forEach(c => {
+    const icon   = c.ok ? '✅' : '❌';
+    const padded = c.name.padEnd(maxName + 2);
+    console.log(`  ${icon}  ${padded}${c.detail}`);
+  });
+
+  const allOk = checks.every(c => c.ok);
+  console.log('');
+  if (allOk) {
+    console.log('  🚀 All checks passed — server starting...\n');
+  } else {
+    console.log('  ⚠️  Some checks failed — server will start but may have limited functionality.');
+    console.log('     See README-SETUP.md for setup instructions.\n');
+  }
+
+  return allOk;
+}
+
+module.exports = { validateEnvironment };

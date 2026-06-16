@@ -1,0 +1,848 @@
+// backend/server.js
+// Production Agentic Jira Ticket Analyzer — Backend Server
+//
+// What's new vs MVP:
+//   - Config-driven multi-repo routing (config.yaml)
+//   - LanceDB vector store (replaces flat JSON vectorStore.js)
+//   - Dual-format prompt builder (Format A: Bug/Task, Format B: Feature/Epic)
+//   - LLM router with tier-based provider selection
+//   - SQLite ticket history and analytics persistence
+//   - HMAC webhook verification for Jira (production mode)
+//   - New REST API endpoints: /api/tickets, /api/repos, /api/analytics
+//   - Backward-compatible: same /api/jira-webhook, /api/slack/events, /api/latest-analysis URLs
+
+const express = require('express');
+const cors = require('cors');
+const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const { startPolling, forcePoll } = require('./jiraPoller');
+
+// ── Load .env ────────────────────────────────────────────────
+// PKG bundles code into a virtual snapshot; __dirname resolves inside the exe.
+// For files that live NEXT TO the exe (.env, config.yaml) we must use the
+// real executable directory instead.
+const APP_DIR = process.pkg
+  ? path.dirname(process.execPath)   // running as pkg exe  → folder containing the .exe
+  : __dirname;                        // running with node    → backend/
+
+if (fs.existsSync(path.join(APP_DIR, '.env'))) {
+  const envContent = fs.readFileSync(path.join(APP_DIR, '.env'), 'utf8');
+  envContent.split('\n').forEach(line => {
+    const match = line.match(/^\s*([\w.-]+)\s*=\s*(.*)?/);
+    if (match) {
+      const key = match[1];
+      let value = (match[2] || '').trim();
+      if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+        value = value.slice(1, -1);
+      }
+      if (!process.env[key]) process.env[key] = value;
+    }
+  });
+}
+
+// ── Module imports ───────────────────────────────────────────
+const embeddings = require('./embeddings');
+const lanceStore = require('./lanceStore');
+const { indexSingleFile } = require('./indexer');
+const { buildPrompt } = require('./promptBuilder');
+const { routeToLLM, classifyTicketComplexity } = require('./llmRouter');
+const configLoader = require('./configLoader');
+const db = require('./db');
+const { validateEnvironment } = require('./firstRun');
+
+
+const app = express();
+app.use(cors());
+app.use(express.json({
+  verify: (req, res, buf) => { req.rawBody = buf; }
+}));
+
+// ── In-memory cache (fast access for Slack bot, still backed by SQLite) ──
+const ticketAnalysesCache = {};
+let latestTicketAnalysis = {
+  key: '',
+  rawTitle: '',
+  title: 'Waiting for ticket...',
+  description: 'Create a ticket on your Jira board to trigger the workflow.',
+  solution: 'No analysis generated yet.',
+  images: [],
+  jiraUrl: '',
+  format: null,
+  degradedMode: false,
+  chunksUsed: 0,
+};
+
+
+// ── Helper: Parse Atlassian Document Format (ADF) ────────────
+function parseADF(node) {
+  if (!node) return '';
+  if (typeof node === 'string') return node;
+  if (node.type === 'text') return node.text || '';
+  if (Array.isArray(node.content)) return node.content.map(parseADF).join(' ');
+  if (node.content) return parseADF(node.content);
+  return '';
+}
+
+// ── Helper: Download Jira attachments ────────────────────────
+const downloadAttachment = async (url, filename) => {
+  const attachmentsDir = path.join(__dirname, '..', 'frontend', 'icims', 'public', 'attachments');
+  if (!fs.existsSync(attachmentsDir)) fs.mkdirSync(attachmentsDir, { recursive: true });
+
+  const destPath = path.join(attachmentsDir, filename);
+  const writer = fs.createWriteStream(destPath);
+  const headers = {};
+
+  if (process.env.JIRA_EMAIL && process.env.JIRA_API_TOKEN) {
+    const auth = Buffer.from(`${process.env.JIRA_EMAIL}:${process.env.JIRA_API_TOKEN}`).toString('base64');
+    headers['Authorization'] = `Basic ${auth}`;
+  }
+
+  try {
+    const response = await axios({ url, method: 'GET', responseType: 'stream', headers });
+    response.data.pipe(writer);
+    return new Promise((resolve, reject) => {
+      writer.on('finish', () => resolve(`/attachments/${filename}`));
+      writer.on('error', reject);
+    });
+  } catch (error) {
+    console.error(`Failed to download attachment ${filename}:`, error.message);
+    return null;
+  }
+};
+
+// ── Helper: Post or Update comment to Jira ───────────────────
+const postCommentToJira = async (issueKey, commentText, issueSelfUrl, existingCommentId = null) => {
+  const email = process.env.JIRA_EMAIL;
+  const token = process.env.JIRA_API_TOKEN;
+  if (!email || !token) {
+    console.log('⚠️ Jira credentials not configured. Skipping comment post.');
+    return null;
+  }
+  try {
+    const urlObj = new URL(issueSelfUrl);
+    const auth = Buffer.from(`${email}:${token}`).toString('base64');
+    const disclaimer = '*🤖 AI Generated Analysis Disclaimer:*\n_This analysis was generated by the Agentic AI Technical Analyst. Please review before applying._\n\n';
+    const body = disclaimer + commentText;
+
+    if (existingCommentId) {
+      try {
+        const updateUrl = `${urlObj.origin}/rest/api/2/issue/${issueKey}/comment/${existingCommentId}`;
+        const response = await axios.put(updateUrl, { body }, {
+          headers: { 'Authorization': `Basic ${auth}`, 'Content-Type': 'application/json' }
+        });
+        console.log(`✅ Technical analysis comment updated for Jira issue ${issueKey}`);
+        return existingCommentId;
+      } catch (err) {
+        if (err.response?.status === 404) {
+          console.warn(`⚠️ Existing comment ${existingCommentId} not found (deleted?). Creating a new one...`);
+        } else {
+          throw err;
+        }
+      }
+    }
+
+    const commentUrl = `${urlObj.origin}/rest/api/2/issue/${issueKey}/comment`;
+    const response = await axios.post(commentUrl, { body }, {
+      headers: { 'Authorization': `Basic ${auth}`, 'Content-Type': 'application/json' }
+    });
+    console.log(`✅ Technical analysis comment posted to Jira issue ${issueKey}`);
+    return response.data.id;
+  } catch (err) {
+    console.error(`❌ Failed to post/update Jira comment for ${issueKey}:`, err.message);
+    return null;
+  }
+};
+
+// ── Helper: Post message to Slack ────────────────────────────
+const postMessageToSlack = async (channel, text) => {
+  const token = process.env.SLACK_BOT_TOKEN;
+  if (!token) { console.warn('⚠️ SLACK_BOT_TOKEN not configured. Skipping Slack message.'); return; }
+  try {
+    await axios.post('https://slack.com/api/chat.postMessage', { channel, text }, {
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
+    });
+    console.log(`✅ Message posted to Slack channel ${channel}`);
+  } catch (err) {
+    console.error(`❌ Failed to post Slack message to ${channel}:`, err.message);
+  }
+};
+
+// ── Helper: Fetch Jira issue ─────────────────────────────────
+const fetchJiraIssue = async (issueKey) => {
+  const email = process.env.JIRA_EMAIL;
+  const token = process.env.JIRA_API_TOKEN;
+  const rawDomain = process.env.JIRA_DOMAIN || 'your-domain.atlassian.net';
+  let domain = 'your-domain.atlassian.net';
+  try { domain = new URL(rawDomain.startsWith('http') ? rawDomain : 'https://' + rawDomain).host; }
+  catch (e) { domain = rawDomain.replace(/^https?:\/\//i, '').split('/')[0]; }
+
+  if (!email || !token) {
+    console.warn('⚠️ Jira credentials not configured. Cannot fetch issue.');
+    return null;
+  }
+
+  try {
+    const url = `https://${domain}/rest/api/2/issue/${issueKey}`;
+    const auth = Buffer.from(`${email}:${token}`).toString('base64');
+    const response = await axios.get(url, { headers: { 'Authorization': `Basic ${auth}`, 'Accept': 'application/json' } });
+    const issue = response.data;
+    if (!issue || !issue.fields) throw new Error('Jira API returned response without fields');
+
+    const rawDescription = issue.fields.description || 'No description provided.';
+    const description = typeof rawDescription === 'object' ? parseADF(rawDescription) : rawDescription;
+    const commentsObj = issue.fields.comment || {};
+    const comments = (commentsObj.comments || []).map(c => {
+      const author = c.author ? c.author.displayName : 'Unknown';
+      const body = typeof c.body === 'object' ? parseADF(c.body) : c.body;
+      return `[${c.created}] ${author}: ${body}`;
+    });
+
+    return {
+      key: issueKey,
+      title: issue.fields.summary,
+      description,
+      issueType: issue.fields.issuetype ? issue.fields.issuetype.name : 'Unknown',
+      commentHistory: comments,
+      jiraUrl: `https://${domain}/browse/${issueKey}`,
+      selfUrl: issue.self
+    };
+  } catch (err) {
+    console.error(`❌ Failed to fetch Jira issue ${issueKey}:`, err.message);
+    return { error: err.message };
+  }
+};
+
+// ── Helper: Search Jira ───────────────────────────────────────
+const searchJiraIssues = async (queryText) => {
+  const email = process.env.JIRA_EMAIL;
+  const token = process.env.JIRA_API_TOKEN;
+  const rawDomain = process.env.JIRA_DOMAIN || 'your-domain.atlassian.net';
+  let domain = 'your-domain.atlassian.net';
+  try { domain = new URL(rawDomain.startsWith('http') ? rawDomain : 'https://' + rawDomain).host; }
+  catch (e) { domain = rawDomain.replace(/^https?:\/\//i, '').split('/')[0]; }
+
+  if (!email || !token) return [];
+  try {
+    const url = `https://${domain}/rest/api/3/search/jql`;
+    const auth = Buffer.from(`${email}:${token}`).toString('base64');
+    const jql = `text ~ "${queryText.replace(/"/g, '\\"')}"`;
+    const response = await axios.post(url, { jql, maxResults: 5, fields: ['summary', 'description', 'status'] }, {
+      headers: { 'Authorization': `Basic ${auth}`, 'Content-Type': 'application/json' }
+    });
+    return (response.data.issues || []).map(issue => {
+      const rawDesc = issue.fields.description || '';
+      return {
+        key: issue.key,
+        title: issue.fields.summary,
+        description: typeof rawDesc === 'object' ? parseADF(rawDesc) : rawDesc,
+        status: issue.fields.status ? issue.fields.status.name : 'Unknown',
+        jiraUrl: `https://${domain}/browse/${issue.key}`
+      };
+    });
+  } catch (err) {
+    console.error('❌ Jira search failed:', err.message);
+    return [];
+  }
+};
+
+// ── Helper: Verify Slack HMAC ─────────────────────────────────
+const verifySlackSignature = (req) => {
+  const signature = req.headers['x-slack-signature'];
+  const timestamp = req.headers['x-slack-request-timestamp'];
+  const secret = process.env.SLACK_SIGNING_SECRET;
+  if (!secret) return true;
+  if (!signature || !timestamp) return false;
+  if (Math.floor(Date.now() / 1000) - parseInt(timestamp) > 300) return false;
+  try {
+    const rawBody = req.rawBody ? req.rawBody.toString('utf8') : JSON.stringify(req.body);
+    const mySignature = 'v0=' + crypto.createHmac('sha256', secret).update(`v0:${timestamp}:${rawBody}`, 'utf8').digest('hex');
+    return crypto.timingSafeEqual(Buffer.from(mySignature, 'utf8'), Buffer.from(signature, 'utf8'));
+  } catch { return false; }
+};
+
+// ── Helper: Verify Jira HMAC (production mode) ───────────────
+const verifyJiraWebhook = (req) => {
+  const secret = process.env.JIRA_WEBHOOK_SECRET;
+  if (!secret) return true; // Skip in dev mode
+  const signature = req.headers['x-hub-signature'];
+  if (!signature) return false;
+  const rawBody = req.rawBody ? req.rawBody.toString('utf8') : JSON.stringify(req.body);
+  const expected = 'sha256=' + crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
+  try {
+    return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
+  } catch { return false; }
+};
+
+// ── Core Analysis Worker ──────────────────────────────────────
+const processAnalysis = async (ticketKey, title, description, imagePaths, jiraUrl, issueType = 'Task') => {
+  // 1. Determine which repo to search based on Jira project key
+  const projectKey = configLoader.extractProjectKey(ticketKey);
+  const repoConfig = configLoader.getRepoForJiraProject(projectKey);
+  const repoId = repoConfig ? repoConfig.id : 'default';
+
+  console.log(`\n🔍 [${ticketKey}] Project key: "${projectKey}" → Repo: "${repoId}" | Issue type: "${issueType}"`);
+
+  // 2. Resolve ticket format and complexity tier
+  let resolvedIssueType = issueType || 'Task';
+  const isDeterministicFormatB = ['story', 'feature', 'new feature', 'epic', 'improvement', 'enhancement', 'initiative', 'architecture'].includes(resolvedIssueType.toLowerCase()) ||
+    (title || '').toLowerCase().trim().startsWith('story') ||
+    (title || '').toLowerCase().trim().startsWith('feature') ||
+    (title || '').toLowerCase().trim().startsWith('epic');
+
+  let resolvedFormat = isDeterministicFormatB ? 'formatB' : 'formatA';
+  let isComplex = isDeterministicFormatB;
+
+  // If it's a generic Task/Bug, ask the LLM to classify its complexity to see if we should elevate it
+  if (!isDeterministicFormatB) {
+    const complexity = await classifyTicketComplexity(title, description);
+    if (complexity === 'balanced') {
+      console.log(`⚡ Complexity Classifier elevated ticket [${ticketKey}] to COMPLEX → upgrading to balanced tier`);
+      resolvedIssueType = 'Story'; // elevating forces Format B
+      resolvedFormat = 'formatB';
+      isComplex = true;
+    }
+  }
+
+  // 3. Dynamic context chunk sizing: 5 chunks for Simple, 25 chunks for Complex
+  const maxChunksToRetrieve = isComplex ? 25 : 5;
+  console.log(`🎯 Ticket classified as ${isComplex ? 'COMPLEX' : 'SIMPLE'} → retrieving max ${maxChunksToRetrieve} code chunks to optimize tokens`);
+
+  // 4. Embed the ticket query and query vector store
+  let chunks = [];
+  let degradedMode = false;
+  try {
+    const queryText = `${title}\n${description}`;
+    console.log(`🤖 Generating query embedding...`);
+    const queryVector = await embeddings.embedText(queryText);
+
+    if (queryVector === null) {
+      degradedMode = true;
+      console.warn(`⚠️  [DEGRADED MODE] No embedding provider available.`);
+    } else {
+      console.log(`🔍 Querying LanceDB/pgvector (repo: ${repoId})...`);
+      chunks = await lanceStore.similaritySearch(queryVector, maxChunksToRetrieve, repoId);
+      console.log(`   Found ${chunks.length} relevant chunk(s)`);
+    }
+  } catch (err) {
+    console.error('❌ Vector search failed (continuing without code context):', err.message);
+    degradedMode = true;
+  }
+
+  // 5. Build prompt
+  const { prompt, format, tier, estimatedInputTokens, usedChunks } = buildPrompt({
+    title,
+    description,
+    issueType: resolvedIssueType,
+    chunks,
+    repoPath: repoConfig ? repoConfig.localPath : null,
+    tokenBudget: configLoader.getTokenBudget(resolvedFormat)
+  });
+
+  console.log(`📝 Format: ${format} | Tier: ${tier} | Chunks used: ${usedChunks} | ~${estimatedInputTokens} input tokens`);
+
+  // 6. Route to LLM
+  let technicalSolution = '';
+  let llmProvider = 'unknown';
+  let outputTokens = 0;
+
+  try {
+    const result = await routeToLLM(prompt, tier);
+    technicalSolution = result.text;
+    llmProvider = `${result.provider}/${result.model}`;
+    outputTokens = result.outputTokens;
+  } catch (llmErr) {
+    console.error('❌ LLM routing failed:', llmErr.message);
+    technicalSolution = `❌ Error generating analysis: ${llmErr.message}\n\nPlease verify your API key configuration in .env and that the LLM service is reachable.`;
+  }
+
+  // 7. Check if a comment already exists in the database for this ticket
+  let existingCommentId = null;
+  try {
+    const latest = await db.getLatestAnalysis(ticketKey);
+    if (latest && latest.jira_comment_id) {
+      existingCommentId = latest.jira_comment_id;
+      console.log(`ℹ️  Found existing Jira comment ID: ${existingCommentId} — will perform live update.`);
+    }
+  } catch (err) {
+    console.warn('⚠️ Failed to check latest analysis for comment update:', err.message);
+  }
+
+  // 8. Post or update the analysis comment on Jira
+  let jiraCommentId = existingCommentId;
+  if (jiraUrl) {
+    jiraCommentId = await postCommentToJira(ticketKey, technicalSolution, jiraUrl, existingCommentId);
+  }
+
+  // 9. Build result object
+  const analysis = {
+    key: ticketKey,
+    rawTitle: title,
+    title: `[${ticketKey}] ${title}`,
+    description,
+    solution: technicalSolution,
+    images: imagePaths,
+    jiraUrl,
+    format,
+    issueType,
+    repoId,
+    llmProvider,
+    degradedMode,
+    chunksUsed: chunks.length,
+    jiraCommentId
+  };
+
+  // 10. Persist to Supabase
+  try {
+    await db.upsertTicketAnalysis({
+      issueKey: ticketKey,
+      projectKey,
+      repoId,
+      title,
+      description,
+      issueType,
+      format,
+      analysis: technicalSolution,
+      llmProvider,
+      inputTokens: estimatedInputTokens,
+      outputTokens,
+      jiraUrl,
+      jiraCommentId
+    });
+  } catch (dbErr) {
+    console.error('⚠️ Failed to persist ticket to Supabase:', dbErr.message);
+  }
+
+  // 11. Update in-memory cache
+  latestTicketAnalysis = analysis;
+  ticketAnalysesCache[ticketKey] = analysis;
+
+  return analysis;
+};
+
+// ════════════════════════════════════════════════════════════
+//  ROUTES
+// ════════════════════════════════════════════════════════════
+
+// ── Status ───────────────────────────────────────────────────
+app.get('/', (req, res) => {
+  res.json({
+    status: 'running',
+    version: '2.0.0',
+    message: '🚀 Agentic Jira Ticket Analyzer — Production Backend',
+    endpoints: [
+      'POST /api/jira-webhook',
+      'POST /api/slack/events',
+      'POST /api/git-webhook',
+      'GET  /api/latest-analysis',
+      'GET  /api/tickets',
+      'GET  /api/tickets/:key',
+      'GET  /api/repos',
+      'GET  /api/analytics',
+      'POST /api/analyze (manual trigger)',
+      'POST /api/config/reload'
+    ]
+  });
+});
+
+// ── Jira Webhook ─────────────────────────────────────────────
+app.post('/api/jira-webhook', async (req, res) => {
+  try {
+    // HMAC verification (skipped in dev when JIRA_WEBHOOK_SECRET not set)
+    if (process.env.NODE_ENV === 'production' && !verifyJiraWebhook(req)) {
+      console.warn('⚠️ Jira webhook HMAC verification failed.');
+      return res.status(401).send('Invalid signature');
+    }
+
+    const webhookEvent = req.body.webhookEvent;
+    if (webhookEvent && webhookEvent !== 'jira:issue_created' && webhookEvent !== 'jira:issue_updated') {
+      return res.status(200).send(`Ignored event: ${webhookEvent}`);
+    }
+
+    const issue = req.body.issue;
+    if (!issue) return res.status(200).send('No issue payload found.');
+
+    const ticketKey = issue.key;
+    const title = issue.fields.summary;
+    const rawDescription = issue.fields.description || 'No description provided.';
+    const description = typeof rawDescription === 'object' ? parseADF(rawDescription) : rawDescription;
+    const issueType = issue.fields.issuetype ? issue.fields.issuetype.name : 'Task';
+
+    // Loop prevention: only process description/summary changes on updates
+    if (webhookEvent === 'jira:issue_updated') {
+      const changelog = req.body.changelog;
+      const items = changelog && changelog.items ? changelog.items : [];
+      const isRelevant = items.some(item => item.field === 'description' || item.field === 'summary');
+      if (!isRelevant) {
+        return res.status(200).send('Ignored: no relevant field change.');
+      }
+      console.log(`⚡ Relevant update for [${ticketKey}]: re-analyzing...`);
+    } else {
+      console.log(`\n⚡ New Jira Ticket: [${ticketKey}] ${title} (${issueType})`);
+    }
+
+    // Download image attachments
+    const attachments = issue.fields.attachment || [];
+    const imagePaths = [];
+    for (const att of attachments) {
+      if (att.mimeType && att.mimeType.startsWith('image/')) {
+        const localPath = await downloadAttachment(att.content, `${ticketKey}_${att.filename}`);
+        imagePaths.push(localPath || att.content);
+      }
+    }
+
+    // Respond immediately to Jira (prevent timeout), run analysis async
+    res.status(200).json({ status: 'Accepted', ticketKey });
+
+    // Async analysis (non-blocking response)
+    processAnalysis(ticketKey, title, description, imagePaths, issue.self, issueType)
+      .catch(err => console.error(`❌ Analysis failed for ${ticketKey}:`, err.message));
+
+  } catch (error) {
+    console.error('Error handling Jira webhook:', error.message);
+    if (!res.headersSent) res.status(500).send('Internal Server Error');
+  }
+});
+
+// ── Git Webhook (incremental re-index on push) ───────────────
+app.post('/api/git-webhook', async (req, res) => {
+  try {
+    if (req.body.zen) {
+      return res.status(200).send('GitHub webhook ping received.');
+    }
+
+    const commits = req.body.commits || [];
+    const addedFiles = new Set();
+    const modifiedFiles = new Set();
+    const deletedFiles = new Set();
+
+    commits.forEach(commit => {
+      (commit.added || []).forEach(f => addedFiles.add(f));
+      (commit.modified || []).forEach(f => modifiedFiles.add(f));
+      (commit.removed || []).forEach(f => deletedFiles.add(f));
+    });
+    (req.body.added || []).forEach(f => addedFiles.add(f));
+    (req.body.modified || []).forEach(f => modifiedFiles.add(f));
+    (req.body.removed || []).forEach(f => deletedFiles.add(f));
+
+    // Determine repo from config (use first repo for git webhook; can be extended to use repo URL matching)
+    const allRepos = configLoader.getAllRepos();
+    const repoConfig = allRepos[0]; // TODO: match by repo URL from webhook payload
+    const repoId = repoConfig ? repoConfig.id : 'default';
+    const repoRoot = repoConfig ? repoConfig.localPath : process.env.REPO_PATH || '';
+
+    // Handle deleted files
+    for (const file of deletedFiles) {
+      await lanceStore.removeDocumentsForFile(file, repoId);
+      console.log(`🗑️ Removed deleted file from index: ${file}`);
+    }
+
+    // Re-index modified/added files
+    for (const file of new Set([...addedFiles, ...modifiedFiles])) {
+      const ext = path.extname(file);
+      if (!['.tsx', '.ts', '.jsx', '.js', '.css', '.json', '.py'].includes(ext)) continue;
+
+      const fullPath = path.join(repoRoot, file);
+      if (!fs.existsSync(fullPath)) continue;
+
+      try {
+        const content = fs.readFileSync(fullPath, 'utf8');
+        await indexSingleFile(fullPath, content, repoId, repoRoot);
+        console.log(`⚡ Re-indexed: ${file}`);
+      } catch (err) {
+        console.error(`❌ Failed to re-index ${file}:`, err.message);
+      }
+    }
+
+    res.status(200).json({ status: 'Success', added: [...addedFiles], modified: [...modifiedFiles], removed: [...deletedFiles] });
+  } catch (error) {
+    console.error('❌ Git webhook error:', error.message);
+    res.status(500).send('Internal Server Error');
+  }
+});
+
+// ── Slack Events ─────────────────────────────────────────────
+const processedEvents = new Set();
+
+const handleSlackEvent = async (event, eventId) => {
+  if (eventId && processedEvents.has(eventId)) return;
+  if (eventId) {
+    processedEvents.add(eventId);
+    if (processedEvents.size > 1000) processedEvents.delete(processedEvents.keys().next().value);
+  }
+
+  if (event.bot_id || event.subtype === 'bot_message') return;
+
+  const channel = event.channel;
+  const userText = event.text || '';
+  console.log(`⚡ Slack command: "${userText}" in channel ${channel}`);
+
+  try {
+    // Search command
+    const searchMatch = userText.match(/(?:search|find)\s+["']?([^"']+)["']?/i);
+    if (searchMatch) {
+      await postMessageToSlack(channel, `🔍 Searching Jira for *"${searchMatch[1]}"*...`);
+      const found = await searchJiraIssues(searchMatch[1]);
+      if (found.length === 0) {
+        await postMessageToSlack(channel, `❌ No issues found for *"${searchMatch[1]}"*`);
+      } else {
+        const list = found.map(i => `• *[${i.key}]* <${i.jiraUrl}|${i.title}>\n  Status: _${i.status}_`).join('\n\n');
+        await postMessageToSlack(channel, `✨ Found ${found.length} issue(s):\n\n${list}`);
+      }
+      return;
+    }
+
+    // Ticket key lookup
+    const ticketKeyMatch = userText.match(/([A-Z]+-\d+)/i);
+    let ticketKey = null;
+    let ticketData = null;
+
+    if (ticketKeyMatch) {
+      ticketKey = ticketKeyMatch[1].toUpperCase();
+
+      // Check in-memory cache first, then Supabase
+      ticketData = ticketAnalysesCache[ticketKey];
+      if (!ticketData) {
+        const dbRecord = await db.getLatestAnalysis(ticketKey);
+        if (dbRecord) {
+          ticketData = { key: ticketKey, title: dbRecord.title, description: dbRecord.description, solution: dbRecord.analysis };
+        }
+      }
+
+      if (!ticketData) {
+        await postMessageToSlack(channel, `🔍 Fetching *${ticketKey}* from Jira...`);
+        const jiraData = await fetchJiraIssue(ticketKey);
+        if (!jiraData || jiraData.error) {
+          await postMessageToSlack(channel, `❌ Could not find ticket *${ticketKey}*`);
+          return;
+        }
+        await postMessageToSlack(channel, `🤖 Analyzing *${ticketKey}* — this may take a moment...`);
+        ticketData = await processAnalysis(ticketKey, jiraData.title, jiraData.description, [], jiraData.selfUrl, jiraData.issueType || 'Task');
+      }
+    } else {
+      ticketData = latestTicketAnalysis;
+      if (!ticketData.key) {
+        await postMessageToSlack(channel, `👋 Hi! Mention a Jira key (e.g. *SCRUM-101*) or use \`search "query"\` to find issues.`);
+        return;
+      }
+      ticketKey = ticketData.key;
+      await postMessageToSlack(channel, `ℹ️ Answering based on the latest analyzed ticket: *${ticketKey}*`);
+    }
+
+    // Ask LLM with ticket context
+    await postMessageToSlack(channel, `🤖 Formulating answer for *${ticketKey}*...`);
+    const slackPrompt = `You are an expert AI Technical Assistant in a Slack channel. Answer the developer's question about a Jira ticket.
+
+Jira Ticket: ${ticketData.key || ticketKey}
+Title: ${ticketData.title || ticketData.rawTitle || 'Unknown'}
+Description: ${ticketData.description || 'No description.'}
+Previous Analysis: ${ticketData.solution || 'No analysis yet.'}
+
+Question: ${userText}
+
+Answer concisely (under 200 words). Use markdown formatting.`;
+
+    try {
+      const result = await routeToLLM(slackPrompt, 'fast');
+      await postMessageToSlack(channel, result.text);
+    } catch (llmErr) {
+      await postMessageToSlack(channel, `❌ LLM error: ${llmErr.message}`);
+    }
+
+  } catch (err) {
+    console.error('Slack handler error:', err.message);
+    await postMessageToSlack(channel, `❌ Error: ${err.message}`);
+  }
+};
+
+app.post('/api/slack/events', async (req, res) => {
+  try {
+    if (req.body.type === 'url_verification') {
+      return res.status(200).json({ challenge: req.body.challenge });
+    }
+    if (!verifySlackSignature(req) && process.env.NODE_ENV === 'production') {
+      return res.status(401).send('Invalid signature');
+    }
+    const event = req.body.event;
+    const eventId = req.body.event_id;
+    if (event) {
+      res.status(200).send('Accepted');
+      handleSlackEvent(event, eventId);
+    } else {
+      res.status(200).send('No event.');
+    }
+  } catch (err) {
+    console.error('Slack webhook error:', err.message);
+    if (!res.headersSent) res.status(500).send('Internal Server Error');
+  }
+});
+
+// ── Manual Analysis Trigger ───────────────────────────────────
+app.post('/api/analyze', async (req, res) => {
+  const { ticketKey, title, description, issueType, jiraUrl } = req.body;
+  if (!ticketKey || !title) {
+    return res.status(400).json({ error: 'ticketKey and title are required' });
+  }
+  try {
+    const analysis = await processAnalysis(ticketKey, title, description || '', [], jiraUrl || '', issueType || 'Task');
+    res.json({ status: 'Success', analysis });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Frontend Polling ──────────────────────────────────────────
+app.get('/api/latest-analysis', (req, res) => {
+  res.json(latestTicketAnalysis);
+});
+
+// ── Manual Polling Trigger ────────────────────────────────────
+app.post('/api/poll-now', async (req, res) => {
+  try {
+    const started = await forcePoll();
+    if (started) {
+      res.json({ status: 'polling_started' });
+    } else {
+      res.status(400).json({ error: 'Poller is not configured or running.' });
+    }
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to trigger poll: ' + err.message });
+  }
+});
+
+// ── Ticket History (Supabase) ───────────────────────────────────
+app.get('/api/tickets', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 50;
+    const offset = parseInt(req.query.offset) || 0;
+    const tickets = await db.getAllAnalyses(limit, offset);
+    res.json({ tickets, limit, offset, total: tickets.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/tickets/:key', async (req, res) => {
+  try {
+    const record = await db.getLatestAnalysis(req.params.key);
+    if (!record) return res.status(404).json({ error: 'Ticket not found' });
+    res.json(record);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Repo Status ───────────────────────────────────────────────
+app.get('/api/repos', async (req, res) => {
+  try {
+    const dbRepos = await db.getAllRepoStatus();
+    const configRepos = configLoader.getAllRepos();
+
+    // Merge config with DB status
+    const merged = configRepos.map(repo => {
+      const dbStatus = dbRepos.find(r => r.repo_id === repo.id) || {};
+      return {
+        id: repo.id,
+        name: repo.name,
+        localPath: repo.localPath,
+        jiraProjects: repo.jiraProjects,
+        totalFiles: dbStatus.total_files || 0,
+        totalChunks: dbStatus.total_chunks || 0,
+        lastIndexedAt: dbStatus.last_indexed_at || null,
+        status: dbStatus.status || 'not-indexed'
+      };
+    });
+
+    res.json({ repos: merged });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/repos/:id/index', (req, res) => {
+  try {
+    const { spawn } = require('child_process');
+    const force = req.body.force === true;
+    const args = ['indexer.js'];
+    if (force) args.push('--force');
+    
+    const child = spawn('node', args, { stdio: 'inherit', detached: true });
+    child.unref();
+
+    res.json({ message: 'Indexing triggered successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Analytics ─────────────────────────────────────────────────
+app.get('/api/analytics', async (req, res) => {
+  try {
+    const summary = await db.getAnalyticsSummary();
+    res.json(summary);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Config Reload (hot-reload without restart) ────────────────
+app.post('/api/config/reload', (req, res) => {
+  try {
+    configLoader.reloadConfig();
+    res.json({ status: 'Config reloaded successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Start Server ──────────────────────────────────────────────
+const cfg = (() => { try { return configLoader.getConfig(); } catch { return { server: { port: 3001 } }; } })();
+const PORT = process.env.PORT || cfg.server?.port || 3001;
+
+app.listen(PORT, async () => {
+  console.log(`\n🚀 Agentic Jira Ticket Analyzer v2.0 — running on http://localhost:${PORT}`);
+  console.log(`   Config: config.yaml | DB: data/analyzer.db | Vector: data/lancedb/`);
+  console.log(`   Repos: ${configLoader.getAllRepos().map(r => r.id).join(', ')}`);
+
+  // ── Rehydrate in-memory cache from SQLite on startup ────────
+  // Without this, latestTicketAnalysis resets to "Waiting for ticket..." on every
+  // server restart, even if dozens of tickets have been analysed before.
+  try {
+    const recent = await db.getAllAnalyses(1, 0); // fetch most recent row (no analysis text)
+    if (recent && recent.length > 0) {
+      const full = await db.getLatestAnalysis(recent[0].issue_key); // fetch with analysis text
+      if (full) {
+        latestTicketAnalysis = {
+          key:         full.issue_key,
+          rawTitle:    full.title,
+          title:       `[${full.issue_key}] ${full.title}`,
+          description: full.description || '',
+          solution:    full.analysis   || '',
+          images:      [],
+          jiraUrl:     full.jira_url   || '',
+          format:      full.format     || null,
+          issueType:   full.issue_type || '',
+          repoId:      full.repo_id    || '',
+          llmProvider: full.llm_provider || '',
+          degradedMode: false,
+          chunksUsed:  0,
+        };
+        ticketAnalysesCache[full.issue_key] = latestTicketAnalysis;
+        console.log(`♻️  Rehydrated latest analysis from DB: [${full.issue_key}] ${full.title}`);
+      }
+    }
+  } catch (rehydrateErr) {
+    console.warn('⚠️ Could not rehydrate analysis cache from DB:', rehydrateErr.message);
+  }
+
+  // Start the Jira Poller if enabled
+  try {
+    startPolling(configLoader.getConfig(), processAnalysis);
+  } catch (err) {
+    console.error(`⚠️ Failed to start Jira Poller:`, err.message);
+  }
+
+  // Run environment validator (non-blocking — server is already accepting requests)
+  await validateEnvironment();
+});

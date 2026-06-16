@@ -1,0 +1,26 @@
+{
+  "name": "analyzer-win",
+  "targets": ["node18-win-x64"],
+  "outputPath": "../dist",
+  "assets": [
+    "node_modules/**/*.node",
+    "node_modules/**/*.wasm"
+  ],
+  "scripts": [
+    "server.js",
+    "indexer.js",
+    "astChunker.js",
+    "configLoader.js",
+    "db.js",
+    "embeddings.js",
+    "firstRun.js",
+    "hashCache.js",
+    "lanceStore.js",
+    "llmRouter.js",
+    "promptBuilder.js",
+    "repoSearcher.js"
+  ],
+  "options": {
+    "public": true
+  }
+}

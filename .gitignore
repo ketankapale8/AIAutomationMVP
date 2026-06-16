@@ -30,6 +30,11 @@ build/
 .env.test.local
 .env.production.local
 
+# AIAutomationCloud ignores
+AIAutomationCloud/.env
+AIAutomationCloud/node_modules/
+AIAutomationCloud/data/
+
 # Operating System Files
 .DS_Store
 Thumbs.db
