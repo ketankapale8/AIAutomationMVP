@@ -141,3 +141,26 @@ graph LR
 2. **CI/CD Indexer Integration:** Move the indexing scripts from GitHub Actions to the enterprise's private runner environment (e.g., **GitLab CI runners, Jenkins nodes, or Azure DevOps pipelines**). This ensures that codebase files never leave the company's secure network during chunking.
 3. **Private LLM Gateways:** Replace public API endpoints with secure enterprise gateways such as **Azure OpenAI (private endpoints)** or **AWS Bedrock**. This keeps all prompts, ticket descriptions, and code snippets fully private and compliant with corporate data governance.
 4. **Dockerization:** Package the cloud Express backend into a standard Docker image and run it on container orchestration services like **AWS ECS (Fargate)** or **Azure Kubernetes Service (AKS)** behind an enterprise API Gateway.
+
+---
+
+## 8. Dashboard UI & Verification Snapshots
+
+Below are references to the live web interface showing the repository status, index verification, action workflow logs, and ticket analytics history:
+
+### A. Repositories Status Dashboard
+Displays the metadata of indexed codebases, showing total file count, chunks stored on Supabase, and last index run timestamp.
+![Repositories Status Dashboard](screenshots/repositories_indexed.png)
+
+### B. Automated GitHub Actions Workflow
+The codebase incremental indexer executing successfully on push, compiling dependencies, and generating embeddings using Gemini.
+![GitHub Actions Workflow Run](screenshots/github_actions_run.png)
+
+### C. Live Technical Analysis UI
+Real-time analysis output triggered via Jira webhooks, detailing the complexity tier, chunks retrieved from Supabase, change type, and suggested code modifications.
+![Live Technical Analysis Card](screenshots/live_analysis_scrum44.png)
+
+### D. Ticket History Analytics Log
+Centralized log of all processed analyses retrieved dynamically from the database pool.
+![Ticket History Analytics Log](screenshots/ticket_history.png)
+
