@@ -41,20 +41,20 @@ export default function Sidebar({ serverStatus }) {
         <div className="nav-section-label" style={{ marginTop: 8 }}>System</div>
 
         <a
-          href="http://localhost:5001"
+          href={import.meta.env.VITE_BACKEND_URL || "http://localhost:5001"}
           target="_blank"
           rel="noopener noreferrer"
           className="nav-item"
         >
           <span className="nav-item-icon">🔌</span>
           API Status
-          <span className="nav-badge green">5001</span>
+          <span className="nav-badge green">API</span>
         </a>
 
         <button
           className="nav-item"
           onClick={() =>
-            fetch('http://localhost:5001/api/config/reload', { method: 'POST' })
+            fetch(`${import.meta.env.VITE_BACKEND_URL || 'http://localhost:5001'}/api/config/reload`, { method: 'POST' })
               .then(() => alert('✅ Config reloaded'))
               .catch(() => alert('❌ Could not reach backend'))
           }
@@ -66,7 +66,7 @@ export default function Sidebar({ serverStatus }) {
         <button
           className="nav-item"
           onClick={() => {
-            fetch('http://localhost:5001/api/poll-now', { method: 'POST' })
+            fetch(`${import.meta.env.VITE_BACKEND_URL || 'http://localhost:5001'}/api/poll-now`, { method: 'POST' })
               .then(res => res.json())
               .then(data => {
                 if (data.status === 'polling_started') alert('⚡ Jira Sync Triggered!');
