@@ -150,7 +150,7 @@ async function embedText(text) {
       return result.vector;
     } catch (err) {
       console.warn(`  ⚠️  Gemini embedding failed: ${err.message}`);
-      openCircuit('gemini');
+      // Do NOT open circuit for Gemini during indexing — temporary rate limits shouldn't disable it completely
     }
   }
 
