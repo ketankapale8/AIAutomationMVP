@@ -93,15 +93,33 @@ async function embedWithGemini(text) {
   if (!key) throw new Error('GEMINI_API_KEY not set');
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${key}`;
-  const res = await axios.post(url, {
-    model: 'models/gemini-embedding-001',
-    content: { parts: [{ text }] },
-    outputDimensionality: 768  // Match Ollama nomic-embed-text dims for LanceDB compatibility
-  }, { timeout: 15000 });
+  
+  let retries = 4;
+  let delay = 2000;
+  
+  while (true) {
+    try {
+      const res = await axios.post(url, {
+        model: 'models/gemini-embedding-001',
+        content: { parts: [{ text }] },
+        outputDimensionality: 768  // Match Ollama nomic-embed-text dims for LanceDB compatibility
+      }, { timeout: 15000 });
 
-  const values = res.data?.embedding?.values;
-  if (!values) throw new Error('No embedding in Gemini response');
-  return { vector: values, provider: 'gemini', model: 'gemini-embedding-001', dims: values.length };
+      const values = res.data?.embedding?.values;
+      if (!values) throw new Error('No embedding in Gemini response');
+      return { vector: values, provider: 'gemini', model: 'gemini-embedding-001', dims: values.length };
+    } catch (err) {
+      const isRateLimit = err.response?.status === 429;
+      if (isRateLimit && retries > 0) {
+        console.warn(`  ⚠️  Gemini rate limit hit (429). Retrying in ${delay / 1000}s... (${retries} retries left)`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        retries--;
+        delay *= 2; // Exponential backoff
+        continue;
+      }
+      throw err;
+    }
+  }
 }
 
 async function embedWithOpenAI(text) {
