@@ -309,7 +309,7 @@ function buildPrompt({ title, description, issueType, chunks, tokenBudget, repoP
   const format = detectFormat(resolvedType);
   const tier = detectLLMTier(resolvedType);
 
-  const fileTree = repoPath ? getFileTree(repoPath, 0, 3) : '';
+  const fileTree = repoPath ? getFileTree(repoPath, 0, 6) : '';
 
   // Token budgets
   const budget = tokenBudget || {};
