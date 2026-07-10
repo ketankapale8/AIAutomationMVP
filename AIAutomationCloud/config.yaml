@@ -14,7 +14,9 @@ server:
 repos:
   - id: prozilla-os              # Unique repo identifier (used as vector collection name)
     name: "ProzillaOS Demo"
-    localPath: "C:\\AIAutomationMVP\\testingrepo\\ProzillaOS"
+    localPath: "/tmp/repos/ProzillaOS"   # Linux-compatible path for Render/cloud
+    gitUrl: "https://github.com/prozilla-os/ProzillaOS"
+    gitBranch: "main"
     # Extensions to index
     extensions: [".tsx", ".ts", ".jsx", ".js", ".css", ".json", ".py", ".md"]
     # Directories to skip during scan
