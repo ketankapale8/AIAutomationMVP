@@ -270,8 +270,15 @@ Any new tables, columns, or schema changes needed.
 ## 9. Open Questions / Risks
 Any ambiguities, dependencies, or risks the team should resolve before starting.
 
+## 10. Code Recommendations
+Provide the exact code changes or new file content needed. Use code blocks specifying the file path:
+\`\`\`typescript:path/to/file.ts
+// code here
+\`\`\`
+Provide ready-to-copy code implementations or detailed skeletons for new files and concrete diffs/snippets for modified files, showing exactly where and how code should be integrated.
+
 **CONSTRAINTS:** 
-1. Response should be 600–900 words. Use code examples sparingly (only for API schemas or complex logic).
+1. Response should be comprehensive. Do not omit code implementations; provide developers with highly detailed, copy-pasteable snippets and skeleton structures in section 10.
 2. CRITICAL: DO NOT INVENT OR GUESS EXISTING FILE PATHS. When listing "Files to Modify", you must ONLY list files that explicitly appear in the "Existing Codebase Context" above.`;
 }
 
