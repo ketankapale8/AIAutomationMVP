@@ -138,8 +138,8 @@ indexer:
   chunkSizeChars: 1200
   # Chars of overlap between adjacent chunks
   chunkOverlapChars: 200
-  # Delay in ms between embedding API calls to stay within rate limits
-  embeddingDelayMs: 4000
+  # Delay in ms between embedding API calls to stay within rate limits (7s = ~8.5 RPM, safely under Gemini's 15 RPM free tier)
+  embeddingDelayMs: 7000
   # Vector DB storage directory (relative to backend/)
   lanceDbPath: "./data/lancedb"
   # Hash cache directory (relative to backend/)

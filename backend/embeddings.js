@@ -94,8 +94,10 @@ async function embedWithGemini(text) {
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${key}`;
   
-  let retries = 4;
-  let delay = 2000;
+  // Gemini free tier = 15 RPM. On 429, wait a full 65s (minute reset) before retrying.
+  // Short exponential backoff (2s→4s→8s→16s) is NOT enough for RPM limits.
+  const RATE_LIMIT_WAIT_MS = 65000; // 65 seconds — full minute reset
+  let retries = 3;
   
   while (true) {
     try {
@@ -111,10 +113,11 @@ async function embedWithGemini(text) {
     } catch (err) {
       const isRateLimit = err.response?.status === 429;
       if (isRateLimit && retries > 0) {
-        console.warn(`  ⚠️  Gemini rate limit hit (429). Retrying in ${delay / 1000}s... (${retries} retries left)`);
-        await new Promise(resolve => setTimeout(resolve, delay));
+        console.warn(`  ⚠️  Gemini rate limit hit (429). Waiting ${RATE_LIMIT_WAIT_MS / 1000}s for RPM window to reset... (${retries} retries left)`);
+        // Reset the global throttle clock so the next call after wait is also properly spaced
+        _lastRequestTime = Date.now() + RATE_LIMIT_WAIT_MS - MIN_GAP_MS;
+        await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_WAIT_MS));
         retries--;
-        delay *= 2; // Exponential backoff
         continue;
       }
       throw err;
@@ -144,10 +147,10 @@ async function embedWithOpenAI(text) {
 let _firstCallDone = false;
 
 // ── Global Rate Limiting Throttle ─────────────────────────────
-// Gemini free tier enforces 15 RPM (Requests Per Minute).
-// We restrict requests to 1 every 5 seconds (12 RPM) to guarantee we stay under the limit.
+// Gemini free tier enforces 15 RPM (Requests Per Minute) = 1 request per 4s.
+// We enforce 1 every 7 seconds (≈8.5 RPM) to safely stay under the limit.
 let _lastRequestTime = 0;
-const MIN_GAP_MS = 5000;
+const MIN_GAP_MS = 7000; // 7s gap = ~8.5 RPM, safely under the 15 RPM limit
 
 async function throttleRequest() {
   const now = Date.now();
