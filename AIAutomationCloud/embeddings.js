@@ -143,6 +143,22 @@ async function embedWithOpenAI(text) {
 
 let _firstCallDone = false;
 
+// ── Global Rate Limiting Throttle ─────────────────────────────
+// Gemini free tier enforces 15 RPM (Requests Per Minute).
+// We restrict requests to 1 every 5 seconds (12 RPM) to guarantee we stay under the limit.
+let _lastRequestTime = 0;
+const MIN_GAP_MS = 5000;
+
+async function throttleRequest() {
+  const now = Date.now();
+  const elapsed = now - _lastRequestTime;
+  if (elapsed < MIN_GAP_MS) {
+    const waitTime = MIN_GAP_MS - elapsed;
+    await new Promise(resolve => setTimeout(resolve, waitTime));
+  }
+  _lastRequestTime = Date.now();
+}
+
 /**
  * Generates a vector embedding for the given text.
  * Provider priority: Ollama (local) → Gemini → OpenAI
@@ -160,6 +176,7 @@ async function embedText(text) {
   // ── Provider 1: Gemini (768 dims — free, fast, cloud) ──
   if (process.env.GEMINI_API_KEY && !isCircuitOpen('gemini')) {
     try {
+      await throttleRequest(); // Enforce strict 5s spacing between calls
       const result = await embedWithGemini(text);
       if (!_firstCallDone) {
         console.log(`🧲 Embedding: ${result.provider}/${result.model} (${result.dims} dims)`);
