@@ -163,8 +163,8 @@ async function indexRepo(repoConfig, { force = false } = {}) {
   console.log(`   Path: ${localPath}`);
 
   // Mark as indexing in DB
-  db.upsertRepoStatus({ repoId, repoName, localPath, status: 'indexing' });
-  const logId = db.startIndexLog(repoId, force ? 'full' : 'delta');
+  await db.upsertRepoStatus({ repoId, repoName, localPath, status: 'indexing' });
+  const logId = await db.startIndexLog(repoId, force ? 'full' : 'delta');
   const startTime = Date.now();
 
   let filesAdded = 0, filesSkipped = 0, filesRemoved = 0;
@@ -216,21 +216,21 @@ async function indexRepo(repoConfig, { force = false } = {}) {
     const durationMs = Date.now() - startTime;
 
     // 7. Update DB status
-    db.upsertRepoStatus({
+    await db.upsertRepoStatus({
       repoId, repoName, localPath,
       totalFiles: allFiles.length,
       totalChunks,
       status: 'ready'
     });
-    db.finishIndexLog(logId, { filesAdded, filesSkipped, filesRemoved, durationMs });
+    await db.finishIndexLog(logId, { filesAdded, filesSkipped, filesRemoved, durationMs });
 
     console.log(`\n✅ Repo "${repoId}" indexed in ${(durationMs / 1000).toFixed(1)}s`);
     console.log(`   Added: ${filesAdded} | Skipped: ${filesSkipped} | Removed: ${filesRemoved} | Total chunks: ${totalChunks}`);
 
   } catch (err) {
     const durationMs = Date.now() - startTime;
-    db.upsertRepoStatus({ repoId, repoName, localPath, status: 'error' });
-    db.finishIndexLog(logId, { filesAdded, filesSkipped, filesRemoved, durationMs, error: err.message });
+    await db.upsertRepoStatus({ repoId, repoName, localPath, status: 'error' });
+    await db.finishIndexLog(logId, { filesAdded, filesSkipped, filesRemoved, durationMs, error: err.message });
     console.error(`❌ Indexing failed for repo "${repoId}": ${err.message}`);
     throw err;
   }
