@@ -92,15 +92,16 @@ async function embedWithGemini(text) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error('GEMINI_API_KEY not set');
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${key}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${key}`;
   const res = await axios.post(url, {
-    model: 'models/text-embedding-004',
-    content: { parts: [{ text }] }
+    model: 'models/gemini-embedding-001',
+    content: { parts: [{ text }] },
+    outputDimensionality: 768  // Match Ollama nomic-embed-text dims for LanceDB compatibility
   }, { timeout: 15000 });
 
   const values = res.data?.embedding?.values;
   if (!values) throw new Error('No embedding in Gemini response');
-  return { vector: values, provider: 'gemini', model: 'text-embedding-004', dims: values.length };
+  return { vector: values, provider: 'gemini', model: 'gemini-embedding-001', dims: values.length };
 }
 
 async function embedWithOpenAI(text) {
