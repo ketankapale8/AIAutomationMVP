@@ -67,7 +67,7 @@ async function callProvider(provider, prompt) {
             model: provider.model || 'llama-3.3-70b-versatile',
             messages: [{ role: 'user', content: prompt }],
             temperature: 0.2,
-            max_tokens: 2048
+            max_tokens: 4096
           }, {
             headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
             timeout: 30000
@@ -79,7 +79,7 @@ async function callProvider(provider, prompt) {
           if (!apiKey) throw new Error('ANTHROPIC_API_KEY not set');
           const res = await axios.post('https://api.anthropic.com/v1/messages', {
             model: provider.model || 'claude-3-5-haiku-20241022',
-            max_tokens: 2048,
+            max_tokens: 4096,
             messages: [{ role: 'user', content: prompt }]
           }, {
             headers: {
@@ -99,7 +99,7 @@ async function callProvider(provider, prompt) {
           const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${provider.model || 'gemini-1.5-flash'}:generateContent?key=${apiKey}`;
           const res = await axios.post(geminiUrl, {
             contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 0.2, maxOutputTokens: 2048 }
+            generationConfig: { temperature: 0.2, maxOutputTokens: 4096 }
           }, { timeout: 45000 });
           const candidates = res.data.candidates;
           if (!candidates?.[0]?.content) {
@@ -114,7 +114,7 @@ async function callProvider(provider, prompt) {
             model: provider.model || 'gpt-4o-mini',
             messages: [{ role: 'user', content: prompt }],
             temperature: 0.2,
-            max_tokens: 2048
+            max_tokens: 4096
           }, {
             headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
             timeout: 60000
