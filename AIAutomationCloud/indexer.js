@@ -139,6 +139,9 @@ async function indexFile(absoluteFilePath, content, repoId, repoRootPath, fileHa
       console.error(`    ❌ Embed failed for ${relativePath}:${chunk.startLine} — ${err.message}`);
     }
     if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
+  }
+
+  // 4. Batch insert into LanceDB
   if (docs.length > 0) {
     await lanceStore.addDocuments(docs);
   }
