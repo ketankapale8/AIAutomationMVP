@@ -135,10 +135,10 @@ async function indexFile(absoluteFilePath, content, repoId, repoRootPath, fileHa
         language: chunk.language || '',
         fileHash
       });
-      if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
     } catch (err) {
       console.error(`    ❌ Embed failed for ${relativePath}:${chunk.startLine} — ${err.message}`);
     }
+    if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
   }
 
   // 4. Batch insert into LanceDB
