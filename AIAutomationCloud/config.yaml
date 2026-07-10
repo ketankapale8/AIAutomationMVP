@@ -139,7 +139,7 @@ indexer:
   # Chars of overlap between adjacent chunks
   chunkOverlapChars: 200
   # Delay in ms between embedding API calls to stay within rate limits
-  embeddingDelayMs: 120
+  embeddingDelayMs: 4000
   # Vector DB storage directory (relative to backend/)
   lanceDbPath: "./data/lancedb"
   # Hash cache directory (relative to backend/)
