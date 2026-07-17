@@ -92,35 +92,34 @@ async function embedWithGemini(text) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error('GEMINI_API_KEY not set');
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${key}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-2:embedContent?key=${key}`;
   
-  // Gemini free tier = 15 RPM. On 429, wait a full 65s (minute reset) before retrying.
-  // Short exponential backoff (2s→4s→8s→16s) is NOT enough for RPM limits.
-  const RATE_LIMIT_WAIT_MS = 65000; // 65 seconds — full minute reset
+  // On 429, wait a full 65s (minute reset) before retrying.
+  const RATE_LIMIT_WAIT_MS = 65000;
   let retries = 3;
   
   while (true) {
     try {
       const res = await axios.post(url, {
-        model: 'models/gemini-embedding-001',
+        model: 'models/gemini-embedding-2',
         content: { parts: [{ text }] },
-        outputDimensionality: 768
+        outputDimensionality: 768  // Match Ollama nomic-embed-text dims for pgvector compatibility
       }, { timeout: 15000 });
 
       const values = res.data?.embedding?.values;
       if (!values) throw new Error('No embedding in Gemini response');
-      return { vector: values, provider: 'gemini', model: 'gemini-embedding-001', dims: values.length };
+      return { vector: values, provider: 'gemini', model: 'gemini-embedding-2', dims: values.length };
     } catch (err) {
       const isRateLimit = err.response?.status === 429;
       if (isRateLimit && retries > 0) {
         console.warn(`  ⚠️  Gemini rate limit hit (429). Waiting ${RATE_LIMIT_WAIT_MS / 1000}s for RPM window to reset... (${retries} retries left)`);
-        // Reset the global throttle clock so the next call after this wait is also properly spaced
+        // Reset the global throttle clock so the next call after wait is also properly spaced
         _lastRequestTime = Date.now() + RATE_LIMIT_WAIT_MS - MIN_GAP_MS;
         await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_WAIT_MS));
         retries--;
         continue;
       }
-      throw err; // Throw any other error or if retries run out
+      throw err;
     }
   }
 }
@@ -147,10 +146,10 @@ async function embedWithOpenAI(text) {
 let _firstCallDone = false;
 
 // ── Global Rate Limiting Throttle ─────────────────────────────
-// Gemini free tier enforces 15 RPM (Requests Per Minute) = 1 request per 4s.
-// We enforce 1 every 7 seconds (≈8.5 RPM) to safely stay under the limit.
+// gemini-embedding-2 has a 1,500 RPM rate limit on free tier.
+// We enforce a small 500ms safety gap between calls to ensure high-throughput without flooding.
 let _lastRequestTime = 0;
-const MIN_GAP_MS = 7000; // 7s gap = ~8.5 RPM, safely under the 15 RPM limit
+const MIN_GAP_MS = 500; // 500ms gap = 120 RPM, extremely safe under 1,500 RPM limit
 
 async function throttleRequest() {
   const now = Date.now();
