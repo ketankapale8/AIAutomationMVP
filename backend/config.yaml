@@ -14,7 +14,9 @@ server:
 repos:
   - id: prozilla-os              # Unique repo identifier (used as vector collection name)
     name: "ProzillaOS Demo"
-    localPath: "C:\\AIAutomationMVP\\testingrepo\\ProzillaOS"
+    localPath: "C:\\AIAutomationMVP\\testingrepo\\ProzillaOS"   # Local test path
+    gitUrl: "https://github.com/prozilla-os/ProzillaOS"
+    gitBranch: "main"
     # Extensions to index
     extensions: [".tsx", ".ts", ".jsx", ".js", ".css", ".json", ".py", ".md"]
     # Directories to skip during scan
@@ -50,60 +52,51 @@ llm:
   dailyCloudTokenLimit: 100000
   fast:
     # Used for: Bug, Task, Sub-task
-    # ─ LOCAL  (default): qwen2.5-coder:3b via Ollama → ~60-90s, zero cost, offline
-    # ─ DEMO   (add GROQ_API_KEY): groq llama-3.3-70b → ~7s
-    # ─ PAID   (add ANTHROPIC_API_KEY): claude-haiku → ~3s, best quality
+    # PRIMARY: Gemini 2.0 Flash → free, fast
+    # FALLBACK: Ollama qwen2.5-coder → local, offline
     providers:
+      - name: gemini
+        model: gemini-2.0-flash
+        envKey: GEMINI_API_KEY
       - name: ollama
         model: qwen2.5-coder:3b
         baseUrl: "http://localhost:11434"
-      - name: groq
-        model: llama-3.3-70b-versatile
-        envKey: GROQ_API_KEY
       - name: anthropic
         model: claude-3-5-haiku-20241022
         envKey: ANTHROPIC_API_KEY
-      - name: gemini
-        model: gemini-1.5-flash
-        envKey: GEMINI_API_KEY
       - name: deepseek
         model: deepseek-chat
         envKey: DEEPSEEK_API_KEY
 
   balanced:
     # Used for: Story, Improvement, Feature
-    # ─ LOCAL  (default): qwen2.5-coder:3b via Ollama → ~90-150s, offline
-    # ─ DEMO   (add GROQ_API_KEY): groq llama-3.3-70b → ~9s
-    # ─ PAID   (add ANTHROPIC_API_KEY): claude-sonnet → best reasoning
+    # PRIMARY: Gemini 2.0 Flash → free, handles long context well
+    # FALLBACK: Ollama qwen2.5-coder → local, offline
     providers:
+      - name: gemini
+        model: gemini-2.0-flash
+        envKey: GEMINI_API_KEY
       - name: ollama
         model: qwen2.5-coder:3b
         baseUrl: "http://localhost:11434"
-      - name: groq
-        model: llama-3.3-70b-versatile
-        envKey: GROQ_API_KEY
       - name: anthropic
         model: claude-sonnet-4-5
         envKey: ANTHROPIC_API_KEY
-      - name: gemini
-        model: gemini-1.5-pro
-        envKey: GEMINI_API_KEY
       - name: openai
         model: gpt-4o-mini
         envKey: OPENAI_API_KEY
 
   deep:
     # Used for: Epic, New Feature, Architecture
-    # ─ LOCAL  (default): qwen2.5-coder:3b via Ollama → ~120-180s, offline
-    # ─ DEMO   (add GROQ_API_KEY): groq llama-3.3-70b → ~12s
-    # ─ PAID   (add ANTHROPIC_API_KEY): claude-sonnet → highest quality architecture analysis
+    # PRIMARY: Gemini 2.0 Flash → free, 1M context, great for architecture
+    # FALLBACK: Ollama qwen2.5-coder → local, offline
     providers:
+      - name: gemini
+        model: gemini-2.0-flash
+        envKey: GEMINI_API_KEY
       - name: ollama
         model: qwen2.5-coder:3b
         baseUrl: "http://localhost:11434"
-      - name: groq
-        model: llama-3.3-70b-versatile
-        envKey: GROQ_API_KEY
       - name: anthropic
         model: claude-sonnet-4-5
         envKey: ANTHROPIC_API_KEY
@@ -113,9 +106,6 @@ llm:
       - name: deepseek
         model: deepseek-chat
         envKey: DEEPSEEK_API_KEY
-      - name: gemini
-        model: gemini-1.5-pro
-        envKey: GEMINI_API_KEY
 
 # ── Token Budget ─────────────────────────────────────────────
 tokenBudget:
@@ -137,7 +127,7 @@ indexer:
   # Chars of overlap between adjacent chunks
   chunkOverlapChars: 200
   # Delay in ms between embedding API calls to stay within rate limits
-  embeddingDelayMs: 120
+  embeddingDelayMs: 4000
   # Vector DB storage directory (relative to backend/)
   lanceDbPath: "./data/lancedb"
   # Hash cache directory (relative to backend/)
@@ -151,6 +141,6 @@ jira:
 
 jiraPolling:
   # Set to true to enable outbound polling (bypasses inbound webhooks)
-  enabled: true
+  enabled: false
   # How often to check for new tickets (in seconds)
   intervalSeconds: 30

@@ -32,14 +32,24 @@ function openCircuit(name) {
 }
 
 /**
- * Returns true if the error is an HTTP 429 Rate Limit response.
- * 429 is transient — it means the provider is temporarily at capacity,
- * NOT that the provider is broken. We skip it for this request only,
- * WITHOUT opening the circuit breaker.
+ * Returns true if the error is a rate limit / capacity response.
+ * - 429 = standard HTTP rate limit
+ * - 413 = Groq sends this for TPM (tokens-per-minute) quota exceeded
+ *   (not a genuine "payload too large" — Groq uses 413 for TPM limits on free tier)
+ * These are transient — the provider is temporarily at capacity,
+ * NOT broken. We skip for this request only WITHOUT opening the circuit.
  */
 function isRateLimitError(err) {
-  // Axios wraps HTTP errors in err.response
-  return err?.response?.status === 429;
+  const status = err?.response?.status;
+  if (status === 429) return true;
+  // Groq free tier uses 413 for TPM rate limits — detect by error message
+  if (status === 413) {
+    const msg = err?.response?.data?.error?.message || '';
+    if (msg.includes('rate_limit_exceeded') || msg.includes('tokens per minute') || msg.includes('TPM')) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**

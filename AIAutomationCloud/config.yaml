@@ -52,19 +52,11 @@ llm:
   dailyCloudTokenLimit: 100000
   fast:
     # Used for: Bug, Task, Sub-task
-    # ─ LOCAL  (default): qwen2.5-coder:3b via Ollama → ~60-90s, zero cost, offline
-    # ─ DEMO   (add GROQ_API_KEY): groq llama-3.3-70b → ~7s
-    # ─ PAID   (add ANTHROPIC_API_KEY): claude-haiku → ~3s, best quality
+    # PRIMARY: Gemini 2.0 Flash → free, fast, no rate limit on 2.0-flash
     providers:
       - name: gemini
         model: gemini-2.0-flash
         envKey: GEMINI_API_KEY
-      - name: ollama
-        model: qwen2.5-coder:3b
-        baseUrl: "http://localhost:11434"
-      - name: groq
-        model: llama-3.3-70b-versatile
-        envKey: GROQ_API_KEY
       - name: anthropic
         model: claude-3-5-haiku-20241022
         envKey: ANTHROPIC_API_KEY
@@ -74,19 +66,11 @@ llm:
 
   balanced:
     # Used for: Story, Improvement, Feature
-    # ─ LOCAL  (default): qwen2.5-coder:3b via Ollama → ~90-150s, offline
-    # ─ DEMO   (add GROQ_API_KEY): groq llama-3.3-70b → ~9s
-    # ─ PAID   (add ANTHROPIC_API_KEY): claude-sonnet → best reasoning
+    # PRIMARY: Gemini 2.0 Flash → free, handles long context well
     providers:
       - name: gemini
         model: gemini-2.0-flash
         envKey: GEMINI_API_KEY
-      - name: ollama
-        model: qwen2.5-coder:3b
-        baseUrl: "http://localhost:11434"
-      - name: groq
-        model: llama-3.3-70b-versatile
-        envKey: GROQ_API_KEY
       - name: anthropic
         model: claude-sonnet-4-5
         envKey: ANTHROPIC_API_KEY
@@ -96,19 +80,11 @@ llm:
 
   deep:
     # Used for: Epic, New Feature, Architecture
-    # ─ LOCAL  (default): qwen2.5-coder:3b via Ollama → ~120-180s, offline
-    # ─ DEMO   (add GROQ_API_KEY): groq llama-3.3-70b → ~12s
-    # ─ PAID   (add ANTHROPIC_API_KEY): claude-sonnet → highest quality architecture analysis
+    # PRIMARY: Gemini 2.0 Flash → free, 1M context, great for architecture
     providers:
       - name: gemini
         model: gemini-2.0-flash
         envKey: GEMINI_API_KEY
-      - name: ollama
-        model: qwen2.5-coder:3b
-        baseUrl: "http://localhost:11434"
-      - name: groq
-        model: llama-3.3-70b-versatile
-        envKey: GROQ_API_KEY
       - name: anthropic
         model: claude-sonnet-4-5
         envKey: ANTHROPIC_API_KEY
