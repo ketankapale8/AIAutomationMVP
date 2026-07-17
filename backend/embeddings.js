@@ -92,7 +92,7 @@ async function embedWithGemini(text) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error('GEMINI_API_KEY not set');
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-2:embedContent?key=${key}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${key}`;
   
   // On 429, wait a full 65s (minute reset) before retrying.
   const RATE_LIMIT_WAIT_MS = 65000;
@@ -101,14 +101,14 @@ async function embedWithGemini(text) {
   while (true) {
     try {
       const res = await axios.post(url, {
-        model: 'models/gemini-embedding-2',
+        model: 'models/gemini-embedding-001',
         content: { parts: [{ text }] },
         outputDimensionality: 768  // Match Ollama nomic-embed-text dims for LanceDB compatibility
       }, { timeout: 15000 });
 
       const values = res.data?.embedding?.values;
       if (!values) throw new Error('No embedding in Gemini response');
-      return { vector: values, provider: 'gemini', model: 'gemini-embedding-2', dims: values.length };
+      return { vector: values, provider: 'gemini', model: 'gemini-embedding-001', dims: values.length };
     } catch (err) {
       const isRateLimit = err.response?.status === 429;
       if (isRateLimit && retries > 0) {
@@ -146,10 +146,10 @@ async function embedWithOpenAI(text) {
 let _firstCallDone = false;
 
 // ── Global Rate Limiting Throttle ─────────────────────────────
-// gemini-embedding-2 has a 1,500 RPM rate limit on free tier.
-// We enforce a small 500ms safety gap between calls to ensure high-throughput without flooding.
+// gemini-embedding-001 has a 15 RPM limit on free tier.
+// We enforce a 4000ms safety gap to stay under it.
 let _lastRequestTime = 0;
-const MIN_GAP_MS = 500; // 500ms gap = 120 RPM, extremely safe under 1,500 RPM limit
+const MIN_GAP_MS = 4000; // 4s gap = 15 RPM, extremely safe under free tier limit
 
 async function throttleRequest() {
   const now = Date.now();
@@ -175,7 +175,23 @@ async function throttleRequest() {
 async function embedText(text) {
   if (!text || !text.trim()) return new Array(768).fill(0);
 
-  // ── Provider 1: Ollama (local, 768 dims, free, offline) ──────
+  // ── Provider 1: Gemini (768 dims — same as nomic, compatible!) ──
+  if (process.env.GEMINI_API_KEY && !isCircuitOpen('gemini')) {
+    try {
+      await throttleRequest(); // Enforce strict spacing between calls
+      const result = await embedWithGemini(text);
+      if (!_firstCallDone) {
+        console.log(`🧲 Embedding: ${result.provider}/${result.model} (${result.dims} dims)`);
+        _firstCallDone = true;
+      }
+      return result.vector;
+    } catch (err) {
+      console.warn(`  ⚠️  Gemini embedding failed: ${err.message}`);
+      // Do NOT open circuit for Gemini during indexing — temporary rate limits shouldn't disable it completely
+    }
+  }
+
+  // ── Provider 2: Ollama (local fallback, 768 dims, free, offline) ──────
   if (!isCircuitOpen('ollama')) {
     const reachable = await isOllamaReachable();
     if (reachable) {
@@ -193,22 +209,6 @@ async function embedText(text) {
     } else {
       console.warn('  ⚠️  Ollama not reachable (port 11434) — skipping');
       openCircuit('ollama');
-    }
-  }
-
-  // ── Provider 2: Gemini (768 dims — same as nomic, compatible!) ──
-  if (process.env.GEMINI_API_KEY && !isCircuitOpen('gemini')) {
-    try {
-      await throttleRequest(); // Enforce strict 5s spacing between calls
-      const result = await embedWithGemini(text);
-      if (!_firstCallDone) {
-        console.log(`🧲 Embedding: ${result.provider}/${result.model} (${result.dims} dims)`);
-        _firstCallDone = true;
-      }
-      return result.vector;
-    } catch (err) {
-      console.warn(`  ⚠️  Gemini embedding failed: ${err.message}`);
-      // Do NOT open circuit for Gemini during indexing — temporary rate limits shouldn't disable it completely
     }
   }
 

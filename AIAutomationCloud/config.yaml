@@ -52,11 +52,15 @@ llm:
   dailyCloudTokenLimit: 100000
   fast:
     # Used for: Bug, Task, Sub-task
-    # PRIMARY: Gemini 2.0 Flash → free, fast, no rate limit on 2.0-flash
+    # PRIMARY: Gemini 2.0 Flash → free, fast
+    # FALLBACK: Groq llama-3.3-70b → free cloud tier (failsafe on Gemini 429)
     providers:
       - name: gemini
         model: gemini-2.0-flash
         envKey: GEMINI_API_KEY
+      - name: groq
+        model: llama-3.3-70b-versatile
+        envKey: GROQ_API_KEY
       - name: anthropic
         model: claude-3-5-haiku-20241022
         envKey: ANTHROPIC_API_KEY
@@ -67,10 +71,14 @@ llm:
   balanced:
     # Used for: Story, Improvement, Feature
     # PRIMARY: Gemini 2.0 Flash → free, handles long context well
+    # FALLBACK: Groq llama-3.3-70b → free cloud tier (failsafe on Gemini 429)
     providers:
       - name: gemini
         model: gemini-2.0-flash
         envKey: GEMINI_API_KEY
+      - name: groq
+        model: llama-3.3-70b-versatile
+        envKey: GROQ_API_KEY
       - name: anthropic
         model: claude-sonnet-4-5
         envKey: ANTHROPIC_API_KEY
@@ -81,10 +89,14 @@ llm:
   deep:
     # Used for: Epic, New Feature, Architecture
     # PRIMARY: Gemini 2.0 Flash → free, 1M context, great for architecture
+    # FALLBACK: Groq llama-3.3-70b → free cloud tier (failsafe on Gemini 429)
     providers:
       - name: gemini
         model: gemini-2.0-flash
         envKey: GEMINI_API_KEY
+      - name: groq
+        model: llama-3.3-70b-versatile
+        envKey: GROQ_API_KEY
       - name: anthropic
         model: claude-sonnet-4-5
         envKey: ANTHROPIC_API_KEY
