@@ -113,12 +113,12 @@ tokenBudget:
     ticketTokens: 200
     codeTokens: 1800
     instructionTokens: 150
-    maxChunks: 15
+    maxChunks: 6
   formatB:           # Feature / Epic tickets
     ticketTokens: 350
     codeTokens: 2400
     instructionTokens: 200
-    maxChunks: 25
+    maxChunks: 10
 
 # ── Indexer ──────────────────────────────────────────────────
 indexer:
