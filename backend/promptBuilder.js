@@ -205,9 +205,9 @@ Provide the exact code changes needed. Use code blocks with the language and fil
 \`\`\`
 Keep total code snippets under 200 lines.
 
-**CONSTRAINTS:**
-1. Total response must be under 400 words. No conversational filler.
-2. CRITICAL: DO NOT INVENT OR GUESS FILE PATHS. You must ONLY suggest modifying files that are explicitly listed in the "Relevant Codebase Context" above. If you need to create a new file, use a realistic path based on the context.`;
+    **CONSTRAINTS:**
+    1. Total response must be under 400 words. No conversational filler.
+    2. CRITICAL: DO NOT INVENT OR GUESS FILE PATHS. You must ONLY suggest modifying files that are explicitly listed in the "Relevant Codebase Context" above. If you need to create a new file, study the 'Repository File Structure' tree. For example, in ProzillaOS, all terminal commands MUST be created as separate files under 'packages/core/src/features/shell/commands/' and export a Command object. Do NOT invent generic React files or buttons inside 'demo/src' to handle commands.`;
 }
 
 // ── Format B Prompt (Feature / Epic) ─────────────────────────
@@ -279,7 +279,7 @@ Provide ready-to-copy code implementations or detailed skeletons for new files a
 
 **CONSTRAINTS:** 
 1. Response should be comprehensive. Do not omit code implementations; provide developers with highly detailed, copy-pasteable snippets and skeleton structures in section 10.
-2. CRITICAL: DO NOT INVENT OR GUESS EXISTING FILE PATHS. When listing "Files to Modify", you must ONLY list files that explicitly appear in the "Existing Codebase Context" above.`;
+2. CRITICAL: DO NOT INVENT OR GUESS EXISTING FILE PATHS. When listing "Files to Modify", you must ONLY list files that explicitly appear in the "Existing Codebase Context" above. If you need to create a new file, study the 'Repository File Structure' tree. For example, all terminal commands MUST be created as separate files under 'packages/core/src/features/shell/commands/' exporting a Command object. Do NOT invent generic React files or index entrypoints in 'demo/src' to handle commands.`;
 }
 
 // ── Main export ───────────────────────────────────────────────
